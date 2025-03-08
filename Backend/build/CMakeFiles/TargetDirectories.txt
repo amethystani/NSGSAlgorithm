@@ -1,0 +1,3 @@
+/Users/animesh/PCPPROJECT/build/CMakeFiles/yolov8_ort.dir
+/Users/animesh/PCPPROJECT/build/CMakeFiles/edit_cache.dir
+/Users/animesh/PCPPROJECT/build/CMakeFiles/rebuild_cache.dir
