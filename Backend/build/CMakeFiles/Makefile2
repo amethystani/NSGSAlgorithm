@@ -54,10 +54,10 @@ RM = /opt/homebrew/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /Users/animesh/PCPPROJECT
+CMAKE_SOURCE_DIR = /Users/animesh/PCPPROJECT/Backend
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /Users/animesh/PCPPROJECT/build
+CMAKE_BINARY_DIR = /Users/animesh/PCPPROJECT/Backend/build
 
 #=============================================================================
 # Directory level rules for the build root directory
@@ -85,14 +85,14 @@ clean: CMakeFiles/yolov8_ort.dir/clean
 CMakeFiles/yolov8_ort.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/animesh/PCPPROJECT/build/CMakeFiles --progress-num=1,2,3,4 "Built target yolov8_ort"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=1,2,3,4 "Built target yolov8_ort"
 .PHONY : CMakeFiles/yolov8_ort.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/yolov8_ort.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/animesh/PCPPROJECT/build/CMakeFiles 4
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/animesh/PCPPROJECT/Backend/build/CMakeFiles 4
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/yolov8_ort.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/animesh/PCPPROJECT/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/animesh/PCPPROJECT/Backend/build/CMakeFiles 0
 .PHONY : CMakeFiles/yolov8_ort.dir/rule
 
 # Convenience name for target.
@@ -102,7 +102,7 @@ yolov8_ort: CMakeFiles/yolov8_ort.dir/rule
 # codegen rule for target.
 CMakeFiles/yolov8_ort.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/animesh/PCPPROJECT/build/CMakeFiles --progress-num=1,2,3,4 "Finished codegen for target yolov8_ort"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=1,2,3,4 "Finished codegen for target yolov8_ort"
 .PHONY : CMakeFiles/yolov8_ort.dir/codegen
 
 # clean rule for target.

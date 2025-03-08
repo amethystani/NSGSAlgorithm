@@ -1,105 +1,150 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  RefreshControl,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Clock } from 'lucide-react-native';
+import { Download, Trash2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import Animated, { 
-  FadeIn,
-  useAnimatedStyle, 
-  useSharedValue, 
-  withTiming 
-} from 'react-native-reanimated';
+import * as MediaLibrary from 'expo-media-library';
 import { useTheme } from '@/context/ThemeContext';
-
-// Define types for HistoryItem props
-interface HistoryItemProps {
-  label: string;
-  children: React.ReactNode;
-  last?: boolean;
-}
-
-// iOS 18 inspired history item component
-const HistoryItem = ({ label, children, last = false }: HistoryItemProps) => {
-  const { theme } = useTheme();
-  const opacity = useSharedValue(1);
-  
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: opacity.value,
-      backgroundColor: opacity.value < 1 ? theme.placeholder : theme.card,
-    };
-  });
-  
-  return (
-    <Pressable
-      onPressIn={() => {
-        Haptics.selectionAsync();
-        opacity.value = withTiming(0.8, { duration: 100 });
-      }}
-      onPressOut={() => {
-        opacity.value = withTiming(1, { duration: 200 });
-      }}
-      style={({ pressed }) => [
-        pressed && { backgroundColor: theme.placeholder }
-      ]}
-    >
-      <Animated.View style={[
-        styles.historyItem, 
-        !last && [styles.historyItemBorder, { borderBottomColor: theme.border }],
-        { backgroundColor: theme.card },
-        animatedStyle
-      ]}>
-        <Text style={[styles.historyItemLabel, { color: theme.text }]}>{label}</Text>
-        <View style={styles.historyItemDetail}>
-          {children}
-        </View>
-      </Animated.View>
-    </Pressable>
-  );
-};
+import { getProcessedImages, downloadProcessedImage, ProcessedImage } from '@/api';
+import { triggerHaptic, triggerHapticNotification } from '@/utils/haptics';
 
 export default function HistoryScreen() {
-  const { theme, isDarkMode } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  const [historyItems, setHistoryItems] = useState([]);  // This would normally be populated with actual history data
-  
-  // Use a shorter timeout to make UI appear faster
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setMounted(true);
-    }, 10);
-    
-    return () => clearTimeout(timer);
+  const [images, setImages] = useState<ProcessedImage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { theme } = useTheme();
+
+  const fetchImages = useCallback(async () => {
+    try {
+      setError(null);
+      const fetchedImages = await getProcessedImages();
+      setImages(fetchedImages);
+    } catch (err) {
+      console.error('Failed to fetch images:', err);
+      setError('Failed to load images. Please try again.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: theme.text }]}>History</Text>
-        </View>
+  useEffect(() => {
+    fetchImages();
+  }, [fetchImages]);
 
-        {historyItems.length > 0 ? (
-          <Animated.View
-            entering={mounted ? FadeIn.delay(100).duration(300) : undefined}
-            style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Recent Detections</Text>
-            <View style={[styles.card, { backgroundColor: theme.card, shadowColor: isDarkMode ? 'transparent' : '#000' }]}>
-              {/* This would render actual history items when available */}
-            </View>
-          </Animated.View>
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchImages();
+  }, [fetchImages]);
+
+  const handleDownload = useCallback(async (imageUrl: string, filename: string) => {
+    try {
+      triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+      
+      // Request permission
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Permission not granted');
+        return;
+      }
+      
+      // Download the image
+      const fileUri = await downloadProcessedImage(imageUrl, filename);
+      
+      // Save to media library
+      await MediaLibrary.saveToLibraryAsync(fileUri);
+      
+      // Success feedback
+      triggerHapticNotification(Haptics.NotificationFeedbackType.Success);
+      
+      console.log('Image saved to gallery');
+    } catch (err) {
+      console.error('Error saving image:', err);
+      triggerHapticNotification(Haptics.NotificationFeedbackType.Error);
+    }
+  }, []);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.loadingText, { color: theme.text }]}>
+            Loading images...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.text}
+          />
+        }
+      >
+        <Text style={[styles.title, { color: theme.text }]}>Processing History</Text>
+        
+        {error && (
+          <Text style={[styles.errorText, { color: theme.error }]}>
+            {error}
+          </Text>
+        )}
+        
+        {images.length === 0 && !error ? (
+          <View style={styles.emptyContainer}>
+            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+              No processed images yet
+            </Text>
+            <Text style={[styles.emptySubtext, { color: theme.textSecondary }]}>
+              Images will appear here after processing
+            </Text>
+          </View>
         ) : (
-          <Animated.View 
-            entering={mounted ? FadeIn.delay(150).duration(300) : undefined}
-            style={styles.emptyStateContainer}>
-            <View style={[styles.emptyState, { backgroundColor: theme.card, shadowColor: isDarkMode ? 'transparent' : '#000' }]}>
-              <Clock size={48} color={theme.textSecondary} style={styles.emptyStateIcon} />
-              <Text style={[styles.emptyStateText, { color: theme.text }]}>No Detection History</Text>
-              <Text style={[styles.emptyStateSubtext, { color: theme.textSecondary }]}>
-                Your detection history will appear here
-              </Text>
-            </View>
-          </Animated.View>
+          <View style={styles.imagesGrid}>
+            {images.map((image, index) => (
+              <View 
+                key={image.name + index}
+                style={[styles.imageCard, { backgroundColor: theme.card }]}
+              >
+                <Image
+                  source={{ uri: image.url }}
+                  style={styles.image}
+                  resizeMode="cover"
+                />
+                <View style={styles.imageFooter}>
+                  <Text style={[styles.imageName, { color: theme.text }]} numberOfLines={1}>
+                    {image.name}
+                  </Text>
+                  <View style={styles.actionButtons}>
+                    <TouchableOpacity
+                      style={styles.actionButton}
+                      onPress={() => handleDownload(image.url, image.name)}
+                    >
+                      <Download size={20} color={theme.primary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -108,85 +153,72 @@ export default function HistoryScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 40,
-  },
-  header: {
     padding: 20,
-    paddingTop: 10,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
   },
   title: {
-    fontSize: 36,
-    fontWeight: '800',
-    letterSpacing: -0.5,
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
   },
-  section: {
-    marginTop: 20,
-    paddingHorizontal: 20,
+  errorText: {
+    marginBottom: 15,
+    textAlign: 'center',
+    fontSize: 16,
   },
-  sectionTitle: {
-    fontSize: 20,
+  emptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    fontSize: 18,
     fontWeight: '600',
     marginBottom: 8,
-    marginLeft: 10,
   },
-  card: {
-    borderRadius: 16,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 2,
-    overflow: 'hidden',
+  emptySubtext: {
+    fontSize: 14,
+    textAlign: 'center',
   },
-  historyItem: {
+  imagesGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
+  },
+  imageCard: {
+    width: '48%',
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  image: {
+    width: '100%',
+    height: 180,
+  },
+  imageFooter: {
+    padding: 10,
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    justifyContent: 'space-between',
   },
-  historyItemBorder: {
-    borderBottomWidth: 0.5,
-  },
-  historyItemLabel: {
-    fontSize: 17,
+  imageName: {
+    fontSize: 14,
     fontWeight: '500',
     flex: 1,
   },
-  historyItemDetail: {
+  actionButtons: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    minWidth: 60,
   },
-  emptyStateContainer: {
-    marginTop: 60,
-    paddingHorizontal: 20,
-  },
-  emptyState: {
-    borderRadius: 16,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 20,
-  },
-  emptyStateIcon: {
-    marginBottom: 16,
-  },
-  emptyStateText: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  emptyStateSubtext: {
-    fontSize: 15,
-    textAlign: 'center',
-    paddingHorizontal: 32,
+  actionButton: {
+    padding: 4,
+    marginLeft: 8,
   },
 });

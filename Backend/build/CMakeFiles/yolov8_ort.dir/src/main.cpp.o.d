@@ -1,5 +1,5 @@
 CMakeFiles/yolov8_ort.dir/src/main.cpp.o: \
-  /Users/animesh/PCPPROJECT/src/main.cpp \
+  /Users/animesh/PCPPROJECT/Backend/src/main.cpp \
   /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk/usr/include/c++/v1/regex \
   /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk/usr/include/c++/v1/__algorithm/find.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk/usr/include/c++/v1/__algorithm/find_segment_if.h \
@@ -1117,11 +1117,11 @@ CMakeFiles/yolov8_ort.dir/src/main.cpp.o: \
   /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk/usr/include/c++/v1/__filesystem/path_iterator.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk/usr/include/c++/v1/__filesystem/recursive_directory_iterator.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk/usr/include/c++/v1/__filesystem/u8path.h \
-  /Users/animesh/PCPPROJECT/include/cmdline.h \
-  /Users/animesh/PCPPROJECT/include/utils.h \
+  /Users/animesh/PCPPROJECT/Backend/include/cmdline.h \
+  /Users/animesh/PCPPROJECT/Backend/include/utils.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk/usr/include/c++/v1/codecvt \
   /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk/usr/include/c++/v1/fstream \
-  /Users/animesh/PCPPROJECT/include/yolov8Predictor.h \
-  /Users/animesh/PCPPROJECT/onnxruntime-osx-arm64-1.15.0/include/onnxruntime_cxx_api.h \
-  /Users/animesh/PCPPROJECT/onnxruntime-osx-arm64-1.15.0/include/onnxruntime_c_api.h \
-  /Users/animesh/PCPPROJECT/onnxruntime-osx-arm64-1.15.0/include/onnxruntime_cxx_inline.h
+  /Users/animesh/PCPPROJECT/Backend/include/yolov8Predictor.h \
+  /Users/animesh/PCPPROJECT/Backend/include/onnxruntime_cxx_api.h \
+  /Users/animesh/PCPPROJECT/Backend/include/onnxruntime_c_api.h \
+  /Users/animesh/PCPPROJECT/Backend/include/onnxruntime_cxx_inline.h

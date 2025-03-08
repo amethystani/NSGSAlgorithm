@@ -1,203 +1,310 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Pressable } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Image,
+  TouchableOpacity,
+  Dimensions,
+  RefreshControl,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image as ImageIcon } from 'lucide-react-native';
+import { Download, Eye } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import Animated, { 
-  FadeIn,
-  useAnimatedStyle, 
-  useSharedValue, 
-  withTiming 
-} from 'react-native-reanimated';
+import * as MediaLibrary from 'expo-media-library';
 import { useTheme } from '@/context/ThemeContext';
+import { getProcessedImages, downloadProcessedImage, ProcessedImage } from '@/api';
+import { triggerHaptic, triggerHapticNotification } from '@/utils/haptics';
 
-const DEMO_IMAGES = [
-  'https://images.unsplash.com/photo-1517849845537-4d257902454a',
-  'https://images.unsplash.com/photo-1518020382113-a7e8fc38eac9',
-  'https://images.unsplash.com/photo-1437622368342-7a3d73a34c8f',
-];
-
-// iOS 18 inspired image item component
-const GalleryImage = ({ url, index }: { url: string, index: number }) => {
-  const { theme } = useTheme();
-  const opacity = useSharedValue(1);
-  const scale = useSharedValue(1);
-  
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: opacity.value,
-      transform: [{ scale: scale.value }],
-    };
-  });
-  
-  return (
-    <Pressable
-      onPressIn={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        opacity.value = withTiming(0.9, { duration: 100 });
-        scale.value = withTiming(0.98, { duration: 100 });
-      }}
-      onPressOut={() => {
-        opacity.value = withTiming(1, { duration: 200 });
-        scale.value = withTiming(1, { duration: 200 });
-      }}
-    >
-      <Animated.View 
-        style={[
-          styles.imageContainer,
-          { backgroundColor: theme.card, shadowColor: theme.text === '#FFFFFF' ? 'transparent' : '#000' },
-          animatedStyle
-        ]}
-      >
-        <Image
-          source={{ uri: `${url}?w=400&fit=crop` }}
-          style={styles.image}
-        />
-        <View style={[styles.imageOverlay, { backgroundColor: theme.card }]}>
-          <Text style={[styles.detectionCount, { color: theme.text }]}>5 objects</Text>
-        </View>
-      </Animated.View>
-    </Pressable>
-  );
-};
+const windowWidth = Dimensions.get('window').width;
+const imageSize = (windowWidth - 60) / 2; // 2 images per row with padding
 
 export default function GalleryScreen() {
+  const [images, setImages] = useState<ProcessedImage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<ProcessedImage | null>(null);
   const { theme, isDarkMode } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  
-  // Use a shorter timeout to make UI appear faster
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setMounted(true);
-    }, 10);
-    
-    return () => clearTimeout(timer);
+
+  const fetchImages = useCallback(async () => {
+    try {
+      setError(null);
+      const fetchedImages = await getProcessedImages();
+      setImages(fetchedImages);
+    } catch (err) {
+      console.error('Failed to fetch images:', err);
+      setError('Failed to load images. Please try again.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView 
-        contentContainerStyle={styles.scrollContent} 
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: theme.text }]}>Gallery</Text>
+  useEffect(() => {
+    fetchImages();
+  }, [fetchImages]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchImages();
+  }, [fetchImages]);
+
+  const handleDownload = useCallback(async (image: ProcessedImage) => {
+    try {
+      triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+      
+      // Request permission
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Permission not granted');
+        return;
+      }
+      
+      // Download the image
+      const fileUri = await downloadProcessedImage(image.url, image.name);
+      
+      // Save to media library
+      await MediaLibrary.saveToLibraryAsync(fileUri);
+      
+      // Success feedback
+      triggerHapticNotification(Haptics.NotificationFeedbackType.Success);
+      
+      console.log('Image saved to gallery');
+    } catch (err) {
+      console.error('Error saving image:', err);
+      triggerHapticNotification(Haptics.NotificationFeedbackType.Error);
+    }
+  }, []);
+
+  const handleImagePress = useCallback((image: ProcessedImage) => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedImage(image);
+  }, []);
+
+  const handleClosePreview = useCallback(() => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedImage(null);
+  }, []);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.loadingText, { color: theme.text }]}>
+            Loading gallery...
+          </Text>
         </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.text}
+          />
+        }
+      >
+        <Text style={[styles.title, { color: theme.text }]}>Object Detection Gallery</Text>
         
-        {DEMO_IMAGES.length > 0 ? (
-          <Animated.View
-            entering={mounted ? FadeIn.delay(100).duration(300) : undefined}
-            style={styles.section}
-          >
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Processed Images</Text>
-            <View style={styles.grid}>
-              {DEMO_IMAGES.map((url, index) => (
-                <Animated.View
-                  key={index}
-                  entering={mounted ? FadeIn.delay(150 + index * 50).duration(300) : undefined}
-                >
-                  <GalleryImage url={url} index={index} />
-                </Animated.View>
-              ))}
-            </View>
-          </Animated.View>
+        {error && (
+          <Text style={[styles.errorText, { color: theme.error }]}>
+            {error}
+          </Text>
+        )}
+        
+        {images.length === 0 && !error ? (
+          <View style={styles.emptyContainer}>
+            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+              Your gallery is empty
+            </Text>
+            <Text style={[styles.emptySubtext, { color: theme.textSecondary }]}>
+              Processed images will appear here
+            </Text>
+          </View>
         ) : (
-          <Animated.View 
-            entering={mounted ? FadeIn.delay(150).duration(300) : undefined}
-            style={styles.emptyStateContainer}
-          >
-            <View style={[styles.emptyState, { backgroundColor: theme.card, shadowColor: isDarkMode ? 'transparent' : '#000' }]}>
-              <ImageIcon size={48} color={theme.textSecondary} style={styles.emptyStateIcon} />
-              <Text style={[styles.emptyStateText, { color: theme.text }]}>
-                No processed images yet
-              </Text>
-              <Text style={[styles.emptyStateSubtext, { color: theme.textSecondary }]}>
-                Images will appear here after processing
-              </Text>
-            </View>
-          </Animated.View>
+          <View style={styles.galleryGrid}>
+            {images.map((image, index) => (
+              <TouchableOpacity
+                key={image.name + index}
+                style={[styles.imageCard, { backgroundColor: theme.card }]}
+                onPress={() => handleImagePress(image)}
+                activeOpacity={0.8}
+              >
+                <Image
+                  source={{ uri: image.url }}
+                  style={styles.thumbnail}
+                  resizeMode="cover"
+                />
+                <View style={styles.imageOverlay}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: theme.primary }]}
+                    onPress={() => handleDownload(image)}
+                  >
+                    <Download size={16} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
       </ScrollView>
+      
+      {/* Image Preview Modal */}
+      {selectedImage && (
+        <View style={[styles.previewContainer, { backgroundColor: isDarkMode ? 'rgba(0,0,0,0.9)' : 'rgba(0,0,0,0.7)' }]}>
+          <TouchableOpacity
+            style={styles.closePreview}
+            onPress={handleClosePreview}
+          >
+            <Text style={styles.closeText}>×</Text>
+          </TouchableOpacity>
+          
+          <View style={styles.previewImageContainer}>
+            <Image
+              source={{ uri: selectedImage.url }}
+              style={styles.previewImage}
+              resizeMode="contain"
+            />
+          </View>
+          
+          <Text style={styles.previewName}>{selectedImage.name}</Text>
+          
+          <TouchableOpacity
+            style={[styles.downloadButton, { backgroundColor: theme.primary }]}
+            onPress={() => handleDownload(selectedImage)}
+          >
+            <Download size={20} color="#fff" />
+            <Text style={styles.downloadText}>Save to Gallery</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 40,
-  },
-  header: {
     padding: 20,
-    paddingTop: 10,
   },
-  title: {
-    fontSize: 36,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-  section: {
-    marginTop: 10,
-    paddingHorizontal: 20,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 8,
-    marginLeft: 10,
-  },
-  grid: {
-    flexDirection: 'column',
-    gap: 16,
-  },
-  imageContainer: {
-    width: '100%',
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  image: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-  },
-  imageOverlay: {
-    padding: 16,
-  },
-  detectionCount: {
-    fontSize: 17,
-    fontWeight: '500',
-  },
-  emptyStateContainer: {
-    marginTop: 60,
-    paddingHorizontal: 20,
-  },
-  emptyState: {
-    borderRadius: 16,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 2,
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 20,
   },
-  emptyStateIcon: {
-    marginBottom: 16,
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
   },
-  emptyStateText: {
-    fontSize: 20,
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  errorText: {
+    marginBottom: 15,
+    textAlign: 'center',
+    fontSize: 16,
+  },
+  emptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    fontSize: 18,
     fontWeight: '600',
     marginBottom: 8,
   },
-  emptyStateSubtext: {
-    fontSize: 15,
+  emptySubtext: {
+    fontSize: 14,
     textAlign: 'center',
-    paddingHorizontal: 32,
+  },
+  galleryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  imageCard: {
+    width: imageSize,
+    height: imageSize,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 20,
+  },
+  thumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  imageOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+  },
+  actionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  closePreview: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+  },
+  closeText: {
+    color: 'white',
+    fontSize: 36,
+    fontWeight: 'bold',
+  },
+  previewImageContainer: {
+    width: '100%',
+    height: '70%',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  previewName: {
+    color: 'white',
+    fontSize: 16,
+    marginTop: 20,
+    textAlign: 'center',
+  },
+  downloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  downloadText: {
+    color: 'white',
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
 });

@@ -1,6 +1,17 @@
 {
+  "name": "pcpproject",
+  "version": "1.0.0",
+  "description": "Object Detection and Segmentation with YOLOv8",
+  "scripts": {
+    "dev": "concurrently \"npm run backend:dev\" \"npm run frontend:dev\"",
+    "backend:dev": "cd Backend && npm run dev",
+    "frontend:dev": "cd Frontend && npm run dev",
+    "backend:start": "cd Backend && npm start",
+    "frontend:start": "cd Frontend && npm run dev"
+  },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.1.2",
+    "concurrently": "^8.2.2",
     "lucide-react-native": "^0.479.0"
   }
 }

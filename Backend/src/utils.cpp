@@ -57,9 +57,34 @@ void utils::visualizeDetection(cv::Mat &im, std::vector<Yolov8Result> &results,
                                const std::vector<std::string> &classNames)
 {
     cv::Mat image = im.clone();
+    
+    // Draw masks first so they appear behind the boxes
     for (const Yolov8Result &result : results)
     {
-
+        if (!result.boxMask.empty()) {
+            // Make segmentation masks more visible
+            cv::Scalar maskColor = colors[result.classId + classNames.size()];
+            
+            // Increase color intensity for better visibility
+            maskColor = cv::Scalar(
+                std::min(255, (int)(maskColor[0] * 1.5)),
+                std::min(255, (int)(maskColor[1] * 1.5)),
+                std::min(255, (int)(maskColor[2] * 1.5))
+            );
+            
+            // Create a colored mask
+            cv::Mat coloredMask = cv::Mat::zeros(result.box.size(), CV_8UC3);
+            coloredMask.setTo(maskColor, result.boxMask);
+            
+            // Apply the mask more strongly
+            cv::Mat roi = image(result.box);
+            cv::addWeighted(coloredMask, 0.7, roi, 0.3, 0, roi);
+        }
+    }
+    
+    // Then draw bounding boxes and labels on top
+    for (const Yolov8Result &result : results)
+    {
         int x = result.box.x;
         int y = result.box.y;
 
@@ -69,16 +94,23 @@ void utils::visualizeDetection(cv::Mat &im, std::vector<Yolov8Result> &results,
 
         int baseline = 0;
         cv::Size size = cv::getTextSize(label, cv::FONT_ITALIC, 0.4, 1, &baseline);
-        image(result.box).setTo(colors[classId + classNames.size()], result.boxMask);
+        
+        // Draw the bounding box with thicker lines
         cv::rectangle(image, result.box, colors[classId], 2);
+        
+        // Draw the label background
         cv::rectangle(image,
                       cv::Point(x, y), cv::Point(x + size.width, y + 12),
                       colors[classId], -1);
+        
+        // Draw the text
         cv::putText(image, label,
                     cv::Point(x, y - 3 + 12), cv::FONT_ITALIC,
                     0.4, cv::Scalar(0, 0, 0), 1);
     }
-    cv::addWeighted(im, 0.4, image, 0.6, 0, im);
+    
+    // Apply the final overlay with stronger segmentation visibility
+    cv::addWeighted(im, 0.2, image, 0.8, 0, im);
 }
 
 void utils::letterbox(const cv::Mat &image, cv::Mat &outImage,

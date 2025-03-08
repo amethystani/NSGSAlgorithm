@@ -1,6 +1,6 @@
 #pragma once
 #include <opencv2/opencv.hpp>
-#include <onnxruntime_cxx_api.h>
+#include "onnxruntime_cxx_api.h"
 #include <utility>
 
 #include "utils.h"

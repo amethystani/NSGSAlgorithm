@@ -8,9 +8,9 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/Users/animesh/PCPPROJECT/src/main.cpp" "CMakeFiles/yolov8_ort.dir/src/main.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/main.cpp.o.d"
-  "/Users/animesh/PCPPROJECT/src/utils.cpp" "CMakeFiles/yolov8_ort.dir/src/utils.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/utils.cpp.o.d"
-  "/Users/animesh/PCPPROJECT/src/yolov8Predictor.cpp" "CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o.d"
+  "/Users/animesh/PCPPROJECT/Backend/src/main.cpp" "CMakeFiles/yolov8_ort.dir/src/main.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/main.cpp.o.d"
+  "/Users/animesh/PCPPROJECT/Backend/src/utils.cpp" "CMakeFiles/yolov8_ort.dir/src/utils.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/utils.cpp.o.d"
+  "/Users/animesh/PCPPROJECT/Backend/src/yolov8Predictor.cpp" "CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

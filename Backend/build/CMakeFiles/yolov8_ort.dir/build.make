@@ -53,10 +53,10 @@ RM = /opt/homebrew/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /Users/animesh/PCPPROJECT
+CMAKE_SOURCE_DIR = /Users/animesh/PCPPROJECT/Backend
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /Users/animesh/PCPPROJECT/build
+CMAKE_BINARY_DIR = /Users/animesh/PCPPROJECT/Backend/build
 
 # Include any dependencies generated for this target.
 include CMakeFiles/yolov8_ort.dir/depend.make
@@ -73,46 +73,46 @@ CMakeFiles/yolov8_ort.dir/codegen:
 .PHONY : CMakeFiles/yolov8_ort.dir/codegen
 
 CMakeFiles/yolov8_ort.dir/src/utils.cpp.o: CMakeFiles/yolov8_ort.dir/flags.make
-CMakeFiles/yolov8_ort.dir/src/utils.cpp.o: /Users/animesh/PCPPROJECT/src/utils.cpp
+CMakeFiles/yolov8_ort.dir/src/utils.cpp.o: /Users/animesh/PCPPROJECT/Backend/src/utils.cpp
 CMakeFiles/yolov8_ort.dir/src/utils.cpp.o: CMakeFiles/yolov8_ort.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/yolov8_ort.dir/src/utils.cpp.o"
-	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/yolov8_ort.dir/src/utils.cpp.o -MF CMakeFiles/yolov8_ort.dir/src/utils.cpp.o.d -o CMakeFiles/yolov8_ort.dir/src/utils.cpp.o -c /Users/animesh/PCPPROJECT/src/utils.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/yolov8_ort.dir/src/utils.cpp.o"
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/yolov8_ort.dir/src/utils.cpp.o -MF CMakeFiles/yolov8_ort.dir/src/utils.cpp.o.d -o CMakeFiles/yolov8_ort.dir/src/utils.cpp.o -c /Users/animesh/PCPPROJECT/Backend/src/utils.cpp
 
 CMakeFiles/yolov8_ort.dir/src/utils.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/yolov8_ort.dir/src/utils.cpp.i"
-	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/animesh/PCPPROJECT/src/utils.cpp > CMakeFiles/yolov8_ort.dir/src/utils.cpp.i
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/animesh/PCPPROJECT/Backend/src/utils.cpp > CMakeFiles/yolov8_ort.dir/src/utils.cpp.i
 
 CMakeFiles/yolov8_ort.dir/src/utils.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/yolov8_ort.dir/src/utils.cpp.s"
-	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/animesh/PCPPROJECT/src/utils.cpp -o CMakeFiles/yolov8_ort.dir/src/utils.cpp.s
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/animesh/PCPPROJECT/Backend/src/utils.cpp -o CMakeFiles/yolov8_ort.dir/src/utils.cpp.s
 
 CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o: CMakeFiles/yolov8_ort.dir/flags.make
-CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o: /Users/animesh/PCPPROJECT/src/yolov8Predictor.cpp
+CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o: /Users/animesh/PCPPROJECT/Backend/src/yolov8Predictor.cpp
 CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o: CMakeFiles/yolov8_ort.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o"
-	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o -MF CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o.d -o CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o -c /Users/animesh/PCPPROJECT/src/yolov8Predictor.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o"
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o -MF CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o.d -o CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o -c /Users/animesh/PCPPROJECT/Backend/src/yolov8Predictor.cpp
 
 CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.i"
-	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/animesh/PCPPROJECT/src/yolov8Predictor.cpp > CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.i
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/animesh/PCPPROJECT/Backend/src/yolov8Predictor.cpp > CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.i
 
 CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.s"
-	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/animesh/PCPPROJECT/src/yolov8Predictor.cpp -o CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.s
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/animesh/PCPPROJECT/Backend/src/yolov8Predictor.cpp -o CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.s
 
 CMakeFiles/yolov8_ort.dir/src/main.cpp.o: CMakeFiles/yolov8_ort.dir/flags.make
-CMakeFiles/yolov8_ort.dir/src/main.cpp.o: /Users/animesh/PCPPROJECT/src/main.cpp
+CMakeFiles/yolov8_ort.dir/src/main.cpp.o: /Users/animesh/PCPPROJECT/Backend/src/main.cpp
 CMakeFiles/yolov8_ort.dir/src/main.cpp.o: CMakeFiles/yolov8_ort.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/yolov8_ort.dir/src/main.cpp.o"
-	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/yolov8_ort.dir/src/main.cpp.o -MF CMakeFiles/yolov8_ort.dir/src/main.cpp.o.d -o CMakeFiles/yolov8_ort.dir/src/main.cpp.o -c /Users/animesh/PCPPROJECT/src/main.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/yolov8_ort.dir/src/main.cpp.o"
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/yolov8_ort.dir/src/main.cpp.o -MF CMakeFiles/yolov8_ort.dir/src/main.cpp.o.d -o CMakeFiles/yolov8_ort.dir/src/main.cpp.o -c /Users/animesh/PCPPROJECT/Backend/src/main.cpp
 
 CMakeFiles/yolov8_ort.dir/src/main.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/yolov8_ort.dir/src/main.cpp.i"
-	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/animesh/PCPPROJECT/src/main.cpp > CMakeFiles/yolov8_ort.dir/src/main.cpp.i
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/animesh/PCPPROJECT/Backend/src/main.cpp > CMakeFiles/yolov8_ort.dir/src/main.cpp.i
 
 CMakeFiles/yolov8_ort.dir/src/main.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/yolov8_ort.dir/src/main.cpp.s"
-	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/animesh/PCPPROJECT/src/main.cpp -o CMakeFiles/yolov8_ort.dir/src/main.cpp.s
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/animesh/PCPPROJECT/Backend/src/main.cpp -o CMakeFiles/yolov8_ort.dir/src/main.cpp.s
 
 # Object files for target yolov8_ort
 yolov8_ort_OBJECTS = \
@@ -163,6 +163,7 @@ yolov8_ort: /opt/homebrew/lib/libopencv_wechat_qrcode.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_xfeatures2d.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_xobjdetect.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_xphoto.4.11.0.dylib
+yolov8_ort: /Users/animesh/PCPPROJECT/Backend/onnxruntime-osx-arm64-1.15.0/lib/libonnxruntime.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_shape.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_highgui.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_datasets.4.11.0.dylib
@@ -184,7 +185,7 @@ yolov8_ort: /opt/homebrew/lib/libopencv_photo.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_imgproc.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_core.4.11.0.dylib
 yolov8_ort: CMakeFiles/yolov8_ort.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/animesh/PCPPROJECT/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX executable yolov8_ort"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX executable yolov8_ort"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/yolov8_ort.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
@@ -196,6 +197,6 @@ CMakeFiles/yolov8_ort.dir/clean:
 .PHONY : CMakeFiles/yolov8_ort.dir/clean
 
 CMakeFiles/yolov8_ort.dir/depend:
-	cd /Users/animesh/PCPPROJECT/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /Users/animesh/PCPPROJECT /Users/animesh/PCPPROJECT /Users/animesh/PCPPROJECT/build /Users/animesh/PCPPROJECT/build /Users/animesh/PCPPROJECT/build/CMakeFiles/yolov8_ort.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /Users/animesh/PCPPROJECT/Backend/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /Users/animesh/PCPPROJECT/Backend /Users/animesh/PCPPROJECT/Backend /Users/animesh/PCPPROJECT/Backend/build /Users/animesh/PCPPROJECT/Backend/build /Users/animesh/PCPPROJECT/Backend/build/CMakeFiles/yolov8_ort.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : CMakeFiles/yolov8_ort.dir/depend
 

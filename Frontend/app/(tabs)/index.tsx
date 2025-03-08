@@ -6,9 +6,12 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
+  Image,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Camera, Upload, Image as ImageIcon } from 'lucide-react-native';
+import { Camera, Upload, Image as ImageIcon, Wifi, Bug } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
@@ -22,364 +25,572 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import { processImage, testApiConnection, debugUploadImage, getApiUrl } from '@/api';
+import { triggerHaptic, triggerHapticNotification } from '@/utils/haptics';
 
 const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
 export default function DetectScreen() {
-  const [selectedModel, setSelectedModel] = useState('yolov8m.pt');
+  const [selectedModel, setSelectedModel] = useState('yolov8m-seg');
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [processedImage, setProcessedImage] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isResultVisible, setIsResultVisible] = useState(false);
+  const [apiConnected, setApiConnected] = useState<boolean | null>(null); // null = unknown, true/false for connected status
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [debugMode, setDebugMode] = useState(false);
   const { theme, isDarkMode } = useTheme();
+
+  // Test API connection on component mount
+  useEffect(() => {
+    checkApiConnection();
+  }, []);
+
+  // Function to check API connection
+  const checkApiConnection = useCallback(async () => {
+    setIsTestingConnection(true);
+    setError(null);
+    try {
+      const connected = await testApiConnection();
+      setApiConnected(connected);
+      if (!connected) {
+        setError('Cannot connect to the API server. Please check if the server is running.');
+      }
+    } catch (err) {
+      console.error('Error testing API connection:', err);
+      setApiConnected(false);
+      setError('Cannot connect to the API server. Please check if the server is running.');
+    } finally {
+      setIsTestingConnection(false);
+    }
+  }, []);
 
   // Function to trigger haptic feedback on model selection
   const handleModelSelect = useCallback((model: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
     setSelectedModel(model);
   }, []);
 
-  // Function for camera capture with haptic feedback
+  // Function to take a photo with camera
   const takePhoto = useCallback(async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
-    const result = await ImagePicker.launchCameraAsync({
-      quality: 1,
-    });
+    try {
+      // Request camera permissions first
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      
+      if (status !== 'granted') {
+        setError('Camera permission is required to take photos');
+        Alert.alert('Permission Required', 'Camera permission is needed to take photos.');
+        return;
+      }
+      
+      triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+      
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8, // Slightly reduce quality for better performance
+        aspect: [4, 3],
+        exif: false, // Don't need EXIF data
+      });
 
-    if (!result.canceled) {
-      setProcessing(true);
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        console.log('Selected camera image:', result.assets[0].uri);
+        setSelectedImage(result.assets[0].uri);
+        setProcessedImage(null);
+        setError(null); // Clear any previous errors
+      }
+    } catch (err) {
+      console.error('Error taking photo:', err);
+      setError(err instanceof Error ? err.message : 'Failed to take photo');
+      Alert.alert('Error', 'Failed to take photo. Please try again.');
+    }
+  }, []);
+
+  // Function to select image from gallery
+  const selectImage = useCallback(async () => {
+    try {
+      // Request media library permissions first
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        setError('Media library permission is required to select images');
+        Alert.alert('Permission Required', 'Media library permission is needed to select images.');
+        return;
+      }
+      
+      triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8, // Slightly reduce quality for better performance
+        aspect: [4, 3],
+        exif: false, // Don't need EXIF data
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        console.log('Selected gallery image:', result.assets[0].uri);
+        setSelectedImage(result.assets[0].uri);
+        setProcessedImage(null);
+        setError(null); // Clear any previous errors
+      }
+    } catch (err) {
+      console.error('Error selecting image:', err);
+      setError(err instanceof Error ? err.message : 'Failed to select image');
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    }
+  }, []);
+
+  // Function to process the selected image
+  const handleProcessImage = useCallback(async () => {
+    if (!selectedImage) {
+      Alert.alert('No Image', 'Please select or take a photo first');
+      return;
+    }
+
+    setProcessing(true);
+    setError(null);
+    setProcessedImage(null); // Clear any previous processed image
+    
+    try {
+      // Log the image info before processing
+      console.log(`Processing image: ${selectedImage} with model: ${selectedModel}`);
+      
+      // Log the API URL being used
+      const apiUrl = getApiUrl();
+      console.log(`API URL: ${apiUrl}`);
+      
       // Trigger success haptic when processing starts
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setTimeout(() => {
-        setProcessing(false);
-        // Trigger another haptic when processing completes
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }, 2000);
+      triggerHapticNotification(Haptics.NotificationFeedbackType.Success);
+      
+      let result;
+      
+      if (debugMode) {
+        // Use debug upload mode (just uploads the file without processing)
+        console.log('Using debug mode - uploading without processing');
+        
+        try {
+          // First test API connection
+          const isConnected = await testApiConnection();
+          console.log('API connection test result:', isConnected);
+          
+          if (!isConnected) {
+            throw new Error(`Cannot connect to API at ${apiUrl}. Check that the server is running.`);
+          }
+          
+          result = await debugUploadImage(selectedImage);
+          console.log('Debug upload result:', result);
+          
+          Alert.alert('Debug Upload Success', 
+            `File uploaded successfully without processing:\n${result.file?.originalname}\nSize: ${result.file?.size} bytes`
+          );
+        } catch (debugError: any) {
+          console.error('Debug mode error:', debugError);
+          throw new Error(`Debug upload failed: ${debugError.message}`);
+        }
+      } else {
+        // First test API connection with explicit error handling
+        try {
+          console.log('Testing API connection...');
+          const isConnected = await testApiConnection();
+          console.log('API connection test result:', isConnected);
+          
+          if (!isConnected) {
+            throw new Error(`Cannot connect to API at ${apiUrl}. Check that the server is running.`);
+          }
+        } catch (connectionError: any) {
+          console.error('Connection test error:', connectionError);
+          throw new Error(`API connection failed: ${connectionError.message}`);
+        }
+        
+        // Normal processing mode
+        try {
+          console.log(`Processing with model: ${selectedModel}`);
+          result = await processImage(selectedImage, selectedModel);
+          console.log('Processing result:', result);
+        } catch (processingError: any) {
+          console.error('Image processing error:', processingError);
+          throw new Error(`Processing failed: ${processingError.message}`);
+        }
+        
+        // Force refresh the image cache by adding a timestamp parameter
+        const timestamp = new Date().getTime();
+        
+        // Check for fullUrl in the response first
+        if (result && result.fullUrl) {
+          console.log(`Using full URL from server: ${result.fullUrl}`);
+          setProcessedImage(`${result.fullUrl}?t=${timestamp}`);
+        }
+        // If no fullUrl, use processedImageUrl with API URL
+        else if (result && result.processedImageUrl) {
+          const fullUrl = `${apiUrl}${result.processedImageUrl}`;
+          console.log(`Constructed URL from processedImageUrl: ${fullUrl}`);
+          setProcessedImage(`${fullUrl}?t=${timestamp}`);
+        } else {
+          console.error('No image URL in response:', result);
+          throw new Error('No processed image URL received from server');
+        }
+        
+        // Show success message (or warning for fallback)
+        if (result.isFallback) {
+          Alert.alert(
+            'Processing Warning', 
+            'The segmentation model failed to process this image, so we\'re showing the original image. Try the object detection model instead.'
+          );
+        } else if (result.warning && result.warning.includes('fallback detection')) {
+          Alert.alert(
+            'Segmentation Notice', 
+            'The segmentation model had issues, so we used object detection instead. The results are shown with bounding boxes rather than full segmentation masks.'
+          );
+        } else if (result.warning) {
+          Alert.alert(
+            'Processing Notice', 
+            `The image was processed with a warning: ${result.warning}`
+          );
+        } else {
+          Alert.alert('Success', 'Image processed successfully!');
+        }
+      }
+      
+      // Trigger success haptic when processing is complete
+      triggerHapticNotification(Haptics.NotificationFeedbackType.Success);
+    } catch (err: any) {
+      console.error('Error processing image:', err);
+      const errorMessage = err?.message || 'Failed to process image. Please try debug mode to troubleshoot.';
+      setError(errorMessage);
+      
+      // Show error dialog with more details
+      Alert.alert(
+        'Processing Error', 
+        `Error: ${errorMessage}\n\nTry enabling Debug mode to test the connection.`
+      );
+      
+      // Trigger error haptic
+      triggerHapticNotification(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setProcessing(false);
     }
-  }, []);
+  }, [selectedImage, selectedModel, debugMode]);
 
-  // Function for picking image with haptic feedback
-  const pickImage = useCallback(async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true,
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      setProcessing(true);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setTimeout(() => {
-        setProcessing(false);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }, 2000);
-    }
-  }, []);
-
-  // Function for upload with haptic feedback
-  const handleUpload = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // Upload logic would go here
-  }, []);
+  // Toggle debug mode
+  const toggleDebugMode = useCallback(() => {
+    setDebugMode(!debugMode);
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+  }, [debugMode]);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollViewContent}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: theme.text }]}>Object Detection</Text>
-        </View>
-
-        {/* Model Selection */}
-        <View style={[styles.card, { backgroundColor: theme.card, shadowColor: isDarkMode ? 'transparent' : '#000' }]}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>Model Type</Text>
-          <View style={[styles.segmentedControlContainer, { backgroundColor: theme.card }]}>
-            <View style={[styles.segmentedControl, { backgroundColor: isDarkMode ? '#2C2C2E' : '#F2F2F7' }]}>
-              {['yolov8m.pt', 'yolov8m-seg.pt'].map((model) => {
-                const isActive = selectedModel === model;
-                return (
-                  <Animated.View
-                    key={model}
-                    style={[
-                      styles.segmentWrapper,
-                      model === 'yolov8m.pt' && styles.segmentWrapperLeft,
-                      model === 'yolov8m-seg.pt' && styles.segmentWrapperRight,
-                    ]}
-                  >
-                    <TouchableOpacity
-                      style={[
-                        styles.segment,
-                        isActive && [styles.segmentActive, { backgroundColor: theme.card }],
-                      ]}
-                      onPress={() => handleModelSelect(model)}
-                      activeOpacity={0.9}
-                    >
-                      <Text style={[
-                        styles.segmentLabel,
-                        { color: theme.textSecondary },
-                        isActive && [styles.segmentLabelActive, { color: theme.text }]
-                      ]}>
-                        {model.includes('seg') ? 'Segmentation' : 'Detection'}
-                      </Text>
-                    </TouchableOpacity>
-                  </Animated.View>
-                );
-              })}
-            </View>
-          </View>
-        </View>
-
-        {/* Input Options */}
-        <View style={[styles.card, { backgroundColor: theme.card, shadowColor: isDarkMode ? 'transparent' : '#000' }]}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>Input Source</Text>
-          <View style={styles.inputGrid}>
-            {[
-              { icon: Camera, label: 'Camera', action: takePhoto, color: '#34C759' },
-              { icon: ImageIcon, label: 'Gallery', action: pickImage, color: '#0A84FF' },
-              { icon: Upload, label: 'Upload', action: handleUpload, color: '#FF453A' }
-            ].map(({ icon: Icon, label, action, color }, index) => (
-              <TouchableOpacity
-                key={label}
-                style={[styles.inputCard, { backgroundColor: theme.card, shadowColor: isDarkMode ? 'transparent' : '#000' }]}
-                onPress={action}
-                activeOpacity={0.7}
-              >
-                <View style={[
-                  styles.iconWrapper,
-                  { backgroundColor: `${color}16` } // 10% opacity version of the color
-                ]}>
-                  <Icon size={28} color={color} strokeWidth={2.5} />
-                </View>
-                <Text style={[styles.inputLabel, { color: theme.text }]}>{label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Results Section */}
-        <View style={[styles.card, { backgroundColor: theme.card, shadowColor: isDarkMode ? 'transparent' : '#000' }]}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>Analysis Results</Text>
-          <View style={styles.resultsPlaceholder}>
-            <View style={[styles.placeholderIconContainer, { backgroundColor: isDarkMode ? '#2C2C2E' : '#F2F2F7' }]}>
-              <ImageIcon size={36} color={theme.textSecondary} strokeWidth={1.5} />
-            </View>
-            <Text style={[styles.placeholderTitle, { color: theme.text }]}>
-              No Results Yet
-            </Text>
-            <Text style={[styles.placeholderText, { color: theme.textSecondary }]}>
-              Select an image to begin object detection
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* Processing Overlay */}
-      {processing && (
-        <AnimatedBlurView
-          entering={FadeIn.duration(300)}
-          exiting={FadeOut.duration(300)}
-          style={styles.processingOverlay}
-          intensity={15}
-          tint={isDarkMode ? "dark" : "light"}
-        >
-          <Animated.View
-            entering={SlideInDown.springify().damping(15)}
-            style={[styles.processingContent, 
-            { backgroundColor: isDarkMode ? 'rgba(30, 30, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)', 
-              shadowColor: isDarkMode ? 'transparent' : '#000' }]}
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={[styles.title, { color: theme.text }]}>Object Detection</Text>
+        
+        {/* API Connection Status */}
+        <View style={styles.apiConnectionContainer}>
+          <TouchableOpacity
+            style={[styles.connectionButton, { backgroundColor: theme.card }]}
+            onPress={checkApiConnection}
+            disabled={isTestingConnection}
           >
-            <Text style={[styles.processingTitle, { color: theme.text }]}>Analyzing Image</Text>
-            <View style={styles.progressContainer}>
-              <View style={[styles.progressBar, { backgroundColor: isDarkMode ? '#2C2C2E' : '#E5E5EA' }]}>
-                <Animated.View 
-                  style={[styles.progressBarFill]}
-                />
-              </View>
-              <Text style={[styles.progressText, { color: theme.textSecondary }]}>60% Complete</Text>
+            {isTestingConnection ? (
+              <ActivityIndicator size="small" color={theme.primary} />
+            ) : (
+              <Wifi 
+                size={20} 
+                color={apiConnected === true 
+                  ? '#4CAF50' // green for connected
+                  : apiConnected === false 
+                    ? '#F44336' // red for disconnected
+                    : theme.textSecondary // default color for unknown
+                } 
+              />
+            )}
+            <Text style={[styles.connectionText, { color: theme.text }]}>
+              {isTestingConnection 
+                ? 'Testing...' 
+                : apiConnected === true 
+                  ? 'Connected' 
+                  : apiConnected === false 
+                    ? 'Disconnected' 
+                    : 'Check Connection'
+              }
+            </Text>
+          </TouchableOpacity>
+          
+          {/* Debug Mode Toggle */}
+          <TouchableOpacity
+            style={[
+              styles.debugButton, 
+              { 
+                backgroundColor: debugMode ? theme.primary : theme.card,
+                borderColor: theme.border
+              }
+            ]}
+            onPress={toggleDebugMode}
+          >
+            <Bug size={20} color={debugMode ? '#fff' : theme.text} />
+            <Text style={[
+              styles.debugText,
+              { color: debugMode ? '#fff' : theme.text }
+            ]}>
+              Debug
+            </Text>
+          </TouchableOpacity>
+        </View>
+        
+        {/* Error message */}
+        {error && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+        
+        {/* Model selection */}
+        <View style={styles.modelSelection}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Select Model:</Text>
+          <View style={styles.modelButtons}>
+            <TouchableOpacity
+              style={[
+                styles.modelButton,
+                selectedModel === 'yolov8m' && styles.selectedModelButton,
+                { backgroundColor: selectedModel === 'yolov8m' ? theme.primary : theme.card }
+              ]}
+              onPress={() => handleModelSelect('yolov8m')}
+            >
+              <Text style={[
+                styles.modelButtonText, 
+                { color: selectedModel === 'yolov8m' ? '#fff' : theme.text }
+              ]}>
+                Object Detection
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
+                styles.modelButton,
+                selectedModel === 'yolov8m-seg' && styles.selectedModelButton,
+                { backgroundColor: selectedModel === 'yolov8m-seg' ? theme.primary : theme.card }
+              ]}
+              onPress={() => handleModelSelect('yolov8m-seg')}
+            >
+              <Text style={[
+                styles.modelButtonText, 
+                { color: selectedModel === 'yolov8m-seg' ? '#fff' : theme.text }
+              ]}>
+                Segmentation
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        
+        {/* Image preview */}
+        <View style={styles.imagePreviewContainer}>
+          {selectedImage ? (
+            <Image source={{ uri: selectedImage }} style={styles.imagePreview} />
+          ) : (
+            <View style={[styles.noImagePlaceholder, { backgroundColor: theme.card }]}>
+              <ImageIcon size={50} color={theme.textSecondary} />
+              <Text style={[styles.noImageText, { color: theme.textSecondary }]}>
+                No image selected
+              </Text>
             </View>
-          </Animated.View>
-        </AnimatedBlurView>
-      )}
+          )}
+        </View>
+        
+        {/* Action buttons */}
+        <View style={styles.actionButtonsContainer}>
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: theme.card }]}
+            onPress={takePhoto}
+          >
+            <Camera size={24} color={theme.text} />
+            <Text style={[styles.actionButtonText, { color: theme.text }]}>Camera</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: theme.card }]}
+            onPress={selectImage}
+          >
+            <Upload size={24} color={theme.text} />
+            <Text style={[styles.actionButtonText, { color: theme.text }]}>Gallery</Text>
+          </TouchableOpacity>
+        </View>
+        
+        {/* Process button */}
+        <TouchableOpacity
+          style={[
+            styles.processButton,
+            { backgroundColor: theme.primary },
+            (!selectedImage || processing) && { opacity: 0.7 }
+          ]}
+          onPress={() => {
+            console.log('Process button clicked!');
+            handleProcessImage();
+          }}
+          disabled={!selectedImage || processing}
+        >
+          {processing ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.processButtonText}>
+              Process Image
+            </Text>
+          )}
+        </TouchableOpacity>
+        
+        {/* Processed image result */}
+        {processedImage && (
+          <View style={styles.resultContainer}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Result:</Text>
+            <Image 
+              source={{ uri: processedImage.startsWith('http') 
+                ? processedImage 
+                : `${getApiUrl()}${processedImage}` 
+              }} 
+              style={styles.processedImage} 
+              resizeMode="contain"
+            />
+          </View>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollViewContent: {
-    paddingBottom: 32,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     padding: 20,
-    paddingTop: 10,
   },
   title: {
-    fontSize: 36,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-  card: {
-    borderRadius: 16,
-    marginHorizontal: 20,
-    marginBottom: 16,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 2,
-    overflow: 'hidden',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '600',
-    marginVertical: 16,
-    marginHorizontal: 16,
+    marginBottom: 10,
   },
-  segmentedControlContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  modelSelection: {
+    marginBottom: 20,
   },
-  segmentedControl: {
-    flexDirection: 'row',
-    borderRadius: 10,
-    overflow: 'hidden',
-    padding: 2,
-    height: 48,
-  },
-  segmentWrapper: {
-    flex: 1,
-  },
-  segmentWrapperLeft: {
-    borderTopLeftRadius: 8,
-    borderBottomLeftRadius: 8,
-  },
-  segmentWrapperRight: {
-    borderTopRightRadius: 8,
-    borderBottomRightRadius: 8,
-  },
-  segment: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  segmentActive: {
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  segmentLabel: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  segmentLabelActive: {
-    fontWeight: '600',
-  },
-  inputGrid: {
+  modelButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 20,
-    paddingTop: 8,
   },
-  inputCard: {
-    borderRadius: 14,
-    padding: 12,
-    width: '30%',
+  modelButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    flex: 1,
+    marginHorizontal: 5,
     alignItems: 'center',
-    shadowOffset: { width: 0, height: 1 },
+  },
+  selectedModelButton: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  iconWrapper: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  inputLabel: {
-    fontSize: 15,
+  modelButtonText: {
     fontWeight: '600',
   },
-  resultsPlaceholder: {
-    paddingVertical: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeholderIconContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  placeholderTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  placeholderText: {
-    fontSize: 15,
-    textAlign: 'center',
-    maxWidth: '80%',
-  },
-  processingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  processingContent: {
-    borderRadius: 16,
-    padding: 24,
-    width: '90%',
-    maxWidth: 400,
-    alignItems: 'center',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  processingTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  progressContainer: {
-    width: '100%',
-  },
-  progressBar: {
-    height: 8,
-    width: '100%',
-    borderRadius: 4,
+  imagePreviewContainer: {
+    height: 250,
+    marginBottom: 20,
+    borderRadius: 12,
     overflow: 'hidden',
   },
-  progressBarFill: {
+  imagePreview: {
+    width: '100%',
     height: '100%',
-    width: '60%',
-    backgroundColor: '#0A84FF',
-    borderRadius: 4,
   },
-  progressText: {
-    fontSize: 15,
+  noImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
+  },
+  noImageText: {
+    marginTop: 10,
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 20,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    width: '45%',
+  },
+  actionButtonText: {
+    marginLeft: 8,
+    fontWeight: '600',
+  },
+  processButton: {
+    paddingVertical: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  processButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  errorContainer: {
+    marginBottom: 20,
+  },
+  errorText: {
+    color: '#F44336', // Red error color
     textAlign: 'center',
-    marginTop: 12,
+    fontWeight: '600',
+  },
+  resultContainer: {
+    marginTop: 10,
+  },
+  processedImage: {
+    width: '100%',
+    height: 250,
+    borderRadius: 12,
+  },
+  apiConnectionContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  connectionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+  },
+  connectionText: {
+    marginLeft: 10,
+    fontWeight: '600',
+  },
+  debugButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+  },
+  debugText: {
+    marginLeft: 10,
+    fontWeight: '600',
   },
 });
