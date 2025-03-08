@@ -220,13 +220,21 @@ export default function DetectScreen() {
         // Check for fullUrl in the response first
         if (result && result.fullUrl) {
           console.log(`Using full URL from server: ${result.fullUrl}`);
-          setProcessedImage(`${result.fullUrl}?t=${timestamp}`);
+          // Always add a cache-busting parameter
+          const cachebustedUrl = result.fullUrl.includes('?') 
+            ? `${result.fullUrl}&t=${timestamp}` 
+            : `${result.fullUrl}?t=${timestamp}`;
+          setProcessedImage(cachebustedUrl);
         }
         // If no fullUrl, use processedImageUrl with API URL
         else if (result && result.processedImageUrl) {
           const fullUrl = `${apiUrl}${result.processedImageUrl}`;
           console.log(`Constructed URL from processedImageUrl: ${fullUrl}`);
-          setProcessedImage(`${fullUrl}?t=${timestamp}`);
+          // Always add a cache-busting parameter
+          const cachebustedUrl = fullUrl.includes('?') 
+            ? `${fullUrl}&t=${timestamp}` 
+            : `${fullUrl}?t=${timestamp}`;
+          setProcessedImage(cachebustedUrl);
         } else {
           console.error('No image URL in response:', result);
           throw new Error('No processed image URL received from server');
@@ -247,6 +255,11 @@ export default function DetectScreen() {
           Alert.alert(
             'Processing Notice', 
             `The image was processed with a warning: ${result.warning}`
+          );
+        } else if (result.message && result.message.includes('best match')) {
+          Alert.alert(
+            'Processing Success',
+            'The image was processed successfully, but we had to use the best matching output file.'
           );
         } else {
           Alert.alert('Success', 'Image processed successfully!');
