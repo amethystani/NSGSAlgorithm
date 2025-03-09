@@ -16,8 +16,9 @@ app.use(cors({
   credentials: true
 }));
 
-// Parse JSON bodies
-app.use(express.json());
+// Parse JSON bodies with increased limits
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // Root endpoint for health check
 app.get('/', (req, res) => {
@@ -95,12 +96,13 @@ const fileFilter = (req, file, cb) => {
   cb(null, true);
 };
 
-// Configure multer with relaxed options
+// Configure multer with increased limits
 const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB limit to be safe
+    fileSize: 100 * 1024 * 1024, // 100MB limit for high-quality images
+    fieldSize: 100 * 1024 * 1024 // 100MB field size limit for base64 data
   },
 }).single('image');
 
@@ -156,6 +158,47 @@ const handleDirectImageUpload = (req, res, next) => {
 
 // Serve static files from the output directory
 app.use('/processed', express.static(path.join(__dirname, 'Imgoutput')));
+
+// Add API endpoint for deleting processed images
+app.delete('/api/deleteImage/:filename', (req, res) => {
+  // Ensure all responses are JSON
+  res.setHeader('Content-Type', 'application/json');
+  
+  const filename = req.params.filename;
+  const filePath = path.join(outputDir, filename);
+  const metadataPath = path.join(outputDir, `${filename}.meta.json`);
+  
+  console.log(`Request to delete file: ${filename}`);
+  console.log(`File path: ${filePath}`);
+  
+  // Validate filename to prevent directory traversal
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+  
+  try {
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      console.log(`File not found: ${filePath}`);
+      return res.status(404).json({ error: 'File not found', path: filePath });
+    }
+    
+    // Delete the image file
+    fs.unlinkSync(filePath);
+    console.log(`Deleted file: ${filePath}`);
+    
+    // Delete the metadata file if it exists
+    if (fs.existsSync(metadataPath)) {
+      fs.unlinkSync(metadataPath);
+      console.log(`Deleted metadata: ${metadataPath}`);
+    }
+    
+    return res.json({ success: true, message: 'File deleted successfully' });
+  } catch (error) {
+    console.error(`Error deleting file: ${error.message}`);
+    return res.status(500).json({ error: 'Failed to delete file', details: error.message });
+  }
+});
 
 // Debug endpoint for testing file upload without processing
 app.post('/debug-upload', logBodyMiddleware, handleDirectImageUpload, (req, res) => {
@@ -432,6 +475,9 @@ app.post('/process', logBodyMiddleware, handleDirectImageUpload, (req, res) => {
 // Helper function to process an image file with YOLOv8
 function processImageFile(req, res) {
   try {
+    // Start timing the processing
+    const startTime = Date.now();
+    
     let modelType = req.body.modelType || 'yolov8m-seg'; // Default to segmentation model if not specified
     console.log(`Using model type: ${modelType}`);
     
@@ -522,6 +568,11 @@ function processImageFile(req, res) {
       const processedImageUrl = `/processed/${processedName}`;
       console.log(`Processed image URL: ${processedImageUrl}`);
       
+      // Calculate processing time
+      const endTime = Date.now();
+      const processingTime = Math.round((endTime - startTime) / 1000);
+      console.log(`Total processing time: ${processingTime} seconds`);
+      
       // Return the URL to the processed image
       return res.json({
         success: true,
@@ -529,7 +580,8 @@ function processImageFile(req, res) {
         processedImageUrl: processedImageUrl,
         originalImageName: originalName,
         processedImageName: processedName,
-        fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`
+        fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
+        processingTime: processingTime
       });
     }
 
@@ -643,6 +695,8 @@ function processImageFile(req, res) {
     }
     
     // Also clean the output directory to avoid confusion with old files
+    // Commenting out the output directory cleaning code to prevent deleting previous images
+    /*
     try {
       const files = fs.readdirSync(outputDir);
       
@@ -658,6 +712,18 @@ function processImageFile(req, res) {
       console.log(`Output directory cleaned`);
     } catch (cleanError) {
       console.error(`Error cleaning output directory: ${cleanError.message}`);
+      // Continue anyway
+    }
+    */
+    
+    // Instead, ensure the output directory exists
+    try {
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+        console.log(`Created output directory: ${outputDir}`);
+      }
+    } catch (dirError) {
+      console.error(`Error ensuring output directory exists: ${dirError.message}`);
       // Continue anyway
     }
 
@@ -698,11 +764,19 @@ function processImageFile(req, res) {
     
     console.log(`Executing command: ${command}`);
     
-    // Execute with timeout to prevent hanging
-    const timeoutMs = 60000; // 60 seconds
-    const execOptions = { timeout: timeoutMs };
+    // Execute with increased timeout to allow for thorough processing
+    const timeoutMs = 180000; // 180 seconds (3 minutes)
+    const execOptions = { 
+      timeout: timeoutMs,
+      maxBuffer: 100 * 1024 * 1024 // Increase max buffer to 100MB
+    };
     
     exec(command, execOptions, async (error, stdout, stderr) => {
+      // Calculate processing time
+      const endTime = Date.now();
+      const processingTime = Math.round((endTime - startTime) / 1000);
+      console.log(`Total processing time: ${processingTime} seconds`);
+      
       if (error) {
         console.error(`Error executing command: ${error.message}`);
         console.error(`stderr: ${stderr}`);
@@ -713,7 +787,9 @@ function processImageFile(req, res) {
           originalName.lastIndexOf('.') : originalName.length);
         const extension = originalName.lastIndexOf('.') !== -1 ? 
           originalName.substring(originalName.lastIndexOf('.')) : '.jpg';
-        const processedName = `${baseName}_${suffix}${extension}`;
+        // Add timestamp for uniqueness
+        const timestamp = Date.now();
+        const processedName = `${baseName}_${suffix}_${timestamp}${extension}`;
         const processedPath = path.join(outputDir, processedName);
         
         // Create output directory if it doesn't exist
@@ -728,6 +804,20 @@ function processImageFile(req, res) {
         // Construct the URL for the processed image
         const processedImageUrl = `/processed/${processedName}`;
         
+        // Save the processing time in the metadata file
+        try {
+          const metadataPath = path.join(outputDir, `${processedName}.meta.json`);
+          fs.writeFileSync(metadataPath, JSON.stringify({
+            originalName: originalName,
+            processingTime: processingTime,
+            modelType: modelType,
+            processedAt: new Date().toISOString()
+          }));
+          console.log(`Saved metadata to: ${metadataPath}`);
+        } catch (metaError) {
+          console.error(`Error saving metadata: ${metaError.message}`);
+        }
+        
         // Return with a warning about fallback
         return res.json({
           success: true,
@@ -737,7 +827,8 @@ function processImageFile(req, res) {
           originalImageName: originalName,
           processedImageName: processedName,
           fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
-          isFallback: true
+          isFallback: true,
+          processingTime: processingTime
         });
       }
       
@@ -757,16 +848,96 @@ function processImageFile(req, res) {
       console.log(`Extension: ${extension}`);
       
       // The C++ code creates output with this pattern: baseName_suffix.extension
-      const expectedProcessedName = `${baseName}_${suffix}${extension}`;
+      // Add a timestamp to ensure uniqueness
+      const timestamp = Date.now();
+      const expectedProcessedName = `${baseName}_${suffix}_${timestamp}${extension}`;
       const expectedProcessedPath = path.join(outputDir, expectedProcessedName);
       
       console.log(`Expected output filename: ${expectedProcessedName}`);
       console.log(`Expected output path: ${expectedProcessedPath}`);
       
-      // Check if the file exists first
+      // Get the actual output file from the C++ process
+      // The C++ process will create a file with the pattern: baseName_suffix.extension
+      // We need to rename it to include our timestamp
+      const cppOutputName = `${baseName}_${suffix}${extension}`;
+      const cppOutputPath = path.join(outputDir, cppOutputName);
+      
+      // If the C++ created the expected file, rename it to include our timestamp
+      if (fs.existsSync(cppOutputPath)) {
+        // Rename to our timestamped version
+        try {
+          fs.renameSync(cppOutputPath, expectedProcessedPath);
+          console.log(`Renamed output file for uniqueness: ${cppOutputPath} -> ${expectedProcessedPath}`);
+        } catch (renameErr) {
+          console.error(`Failed to rename output file: ${renameErr.message}`);
+          // If rename fails, copy instead
+          try {
+            fs.copyFileSync(cppOutputPath, expectedProcessedPath);
+            console.log(`Copied output file for uniqueness: ${cppOutputPath} -> ${expectedProcessedPath}`);
+            // Remove the original
+            fs.unlinkSync(cppOutputPath);
+          } catch (copyErr) {
+            console.error(`Failed to copy output file: ${copyErr.message}`);
+            // Continue with original path
+            return res.json({
+              success: true,
+              message: 'Image processed successfully but file renaming failed',
+              processedImageUrl: `/processed/${cppOutputName}`,
+              originalImageName: originalName,
+              processedImageName: cppOutputName,
+              fullUrl: `${req.protocol}://${req.get('host')}/processed/${cppOutputName}`,
+              processingTime: processingTime
+            });
+          }
+        }
+      }
+      
+      // Check if our file exists
       if (fs.existsSync(expectedProcessedPath)) {
         const stats = fs.statSync(expectedProcessedPath);
         console.log(`Output file verified: ${expectedProcessedPath}, size: ${stats.size} bytes`);
+        
+        // Save the processing time in the metadata file
+        try {
+          const metadataPath = path.join(outputDir, `${expectedProcessedName}.meta.json`);
+          const fileStats = fs.statSync(expectedProcessedPath);
+          const fileSize = fileStats.size;
+          
+          // Try to get image dimensions using probe-image-size
+          let width = 0;
+          let height = 0;
+          try {
+            const buffer = fs.readFileSync(expectedProcessedPath);
+            // Simple estimation based on JPEG/PNG headers - not perfect but gives an estimate
+            const isJPEG = buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF;
+            const isPNG = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47;
+            
+            if (isPNG && buffer.length > 24) {
+              // PNG width/height is at a fixed position
+              width = buffer.readUInt32BE(16);
+              height = buffer.readUInt32BE(20);
+            }
+            // For JPEG we'd need more complex parsing, so we'll leave those as 0
+          } catch (dimError) {
+            console.error(`Error estimating dimensions: ${dimError.message}`);
+          }
+          
+          fs.writeFileSync(metadataPath, JSON.stringify({
+            originalName: originalName,
+            processingTime: processingTime,
+            modelType: modelType,
+            processedAt: new Date().toISOString(),
+            fileSize: fileSize,
+            fileSizeFormatted: formatFileSize(fileSize),
+            width: width,
+            height: height,
+            suffix: suffix, // Indicates model type (m for detection, ms for segmentation)
+            isFallback: useDetectionFallback
+          }));
+          console.log(`Saved enhanced metadata to: ${metadataPath}`);
+        } catch (metaError) {
+          console.error(`Error saving metadata: ${metaError.message}`);
+        }
         
         // Construct the URL for the processed image
         const processedImageUrl = `/processed/${expectedProcessedName}`;
@@ -779,7 +950,8 @@ function processImageFile(req, res) {
           processedImageUrl: processedImageUrl,
           originalImageName: originalName,
           processedImageName: expectedProcessedName,
-          fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`
+          fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
+          processingTime: processingTime
         });
       }
       
@@ -807,13 +979,19 @@ function processImageFile(req, res) {
             // Construct the URL for the processed image
             const processedImageUrl = `/processed/${foundFile}`;
             
+            // Calculate processing time
+            const endTime = Date.now();
+            const processingTime = Math.round((endTime - startTime) / 1000);
+            console.log(`Total processing time: ${processingTime} seconds`);
+            
             return res.json({
               success: true,
               message: 'Image processed successfully (found existing file)',
               processedImageUrl: processedImageUrl,
               originalImageName: originalName,
               processedImageName: foundFile,
-              fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`
+              fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
+              processingTime: processingTime
             });
           }
         }
@@ -827,7 +1005,21 @@ function processImageFile(req, res) {
         
         // Now we have a copy of the input file as our processed file
         // We'll return it, but with a clear warning
-        const processedImageUrl = `/processed/${expectedProcessedName}`;
+        // Add timestamp for uniqueness
+        const timestamp = Date.now();
+        const processedName = `${expectedProcessedName.replace(suffix, suffix + '_simulated_' + timestamp)}`;
+        const processedPath = path.join(outputDir, processedName);
+        
+        // Copy the input file to this unique path
+        fs.copyFileSync(inputFilePath, processedPath);
+        console.log(`Created simulated output with unique name: ${processedPath}`);
+        
+        const processedImageUrl = `/processed/${processedName}`;
+        
+        // Calculate processing time
+        const endTime = Date.now();
+        const processingTime = Math.round((endTime - startTime) / 1000);
+        console.log(`Total processing time: ${processingTime} seconds`);
         
         return res.json({
           success: true,
@@ -835,28 +1027,40 @@ function processImageFile(req, res) {
           message: 'Note: For actual segmentation, ONNX model needs to be correctly compiled.',
           processedImageUrl: processedImageUrl,
           originalImageName: originalName,
-          processedImageName: expectedProcessedName,
-          fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`
+          processedImageName: processedName,
+          fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
+          processingTime: processingTime
         });
       } catch (error) {
         console.error(`Error finding alternative output file: ${error.message}`);
         
         // As a last resort, just copy the input file to the output with the expected name
         try {
-          fs.copyFileSync(inputFilePath, expectedProcessedPath);
-          console.log(`Created fallback by copying input: ${expectedProcessedPath}`);
+          // Add timestamp for uniqueness
+          const timestamp = Date.now();
+          const fallbackName = `${baseName}_${suffix}_fallback_${timestamp}${extension}`;
+          const fallbackPath = path.join(outputDir, fallbackName);
+          
+          fs.copyFileSync(inputFilePath, fallbackPath);
+          console.log(`Created fallback with unique name: ${fallbackPath}`);
           
           // Construct the URL for the processed image
-          const processedImageUrl = `/processed/${expectedProcessedName}`;
+          const processedImageUrl = `/processed/${fallbackName}`;
+          
+          // Calculate processing time
+          const endTime = Date.now();
+          const processingTime = Math.round((endTime - startTime) / 1000);
+          console.log(`Total processing time: ${processingTime} seconds`);
           
           return res.json({
             success: false,
             warning: 'Failed to find processed image, using original instead',
             processedImageUrl: processedImageUrl,
             originalImageName: originalName,
-            processedImageName: expectedProcessedName,
+            processedImageName: fallbackName,
             fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
-            isFallback: true
+            isFallback: true,
+            processingTime: processingTime
           });
         } catch (copyError) {
           console.error(`Failed to create fallback: ${copyError.message}`);
@@ -886,6 +1090,13 @@ function processImageFile(req, res) {
   }
 }
 
+// Helper function to format file size
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  else if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+  else return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
 // Route to get processing history (list of processed images)
 app.get('/history', (req, res) => {
   const outputDir = path.join(__dirname, 'Imgoutput');
@@ -907,11 +1118,81 @@ app.get('/history', (req, res) => {
       return ['.jpg', '.jpeg', '.png', '.gif'].includes(ext);
     });
     
-    // Map files to URLs
-    const images = imageFiles.map(file => ({
-      name: file,
-      url: `/processed/${file}`
-    }));
+    // Map files to URLs with metadata
+    const images = imageFiles.map(file => {
+      // Read file stats
+      const filePath = path.join(outputDir, file);
+      let fileSize = 0;
+      let fileSizeFormatted = 'Unknown';
+      
+      try {
+        const stats = fs.statSync(filePath);
+        fileSize = stats.size;
+        fileSizeFormatted = formatFileSize(fileSize);
+      } catch (statError) {
+        console.error(`Error reading file stats for ${file}: ${statError.message}`);
+      }
+      
+      // Try to read metadata if it exists
+      let metadata = {
+        processingTime: null,
+        modelType: 'unknown',
+        processedAt: null,
+        width: 0,
+        height: 0,
+        suffix: 'unknown',
+        isFallback: false
+      };
+      
+      try {
+        const metadataPath = path.join(outputDir, `${file}.meta.json`);
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+      } catch (error) {
+        console.error(`Error reading metadata for ${file}: ${error.message}`);
+      }
+      
+      // Analyze the filename to determine model type if not in metadata
+      if (!metadata.modelType || metadata.modelType === 'unknown') {
+        if (file.includes('_ms')) {
+          metadata.modelType = 'yolov8m-seg';
+          metadata.suffix = 'ms';
+        } else if (file.includes('_m')) {
+          metadata.modelType = 'yolov8m';
+          metadata.suffix = 'm';
+        }
+      }
+      
+      // Extract date from processedAt or file stats
+      let processedDate = metadata.processedAt ? new Date(metadata.processedAt) : new Date();
+      let formattedDate = processedDate.toLocaleDateString();
+      let formattedTime = processedDate.toLocaleTimeString();
+      
+      return {
+        name: file,
+        url: `/processed/${file}`,
+        processingTime: metadata.processingTime,
+        fileSize: fileSize,
+        fileSizeFormatted: fileSizeFormatted,
+        width: metadata.width || 0,
+        height: metadata.height || 0,
+        modelType: metadata.modelType || 'unknown',
+        modelTypeName: metadata.modelType === 'yolov8m-seg' ? 'Segmentation' : 
+                      metadata.modelType === 'yolov8m' ? 'Detection' : 'Unknown',
+        processedAt: metadata.processedAt,
+        processedDate: formattedDate,
+        processedTime: formattedTime,
+        isFallback: metadata.isFallback || false
+      };
+    });
+    
+    // Sort images by processedAt (newest first)
+    images.sort((a, b) => {
+      const dateA = a.processedAt ? new Date(a.processedAt) : new Date(0);
+      const dateB = b.processedAt ? new Date(b.processedAt) : new Date(0);
+      return dateB.getTime() - dateA.getTime();
+    });
     
     res.json({ images });
   });

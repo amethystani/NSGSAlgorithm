@@ -161,7 +161,7 @@ export default function SettingsScreen() {
           style={styles.section}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>Processing</Text>
           <View style={[styles.card, { backgroundColor: theme.card, shadowColor: isDarkMode ? 'transparent' : '#000' }]}>
-            <SettingItem label="Use GPU" last>
+            <SettingItem label="Use Optimized Parallel Approach" last>
               <Switch
                 value={useGPU}
                 onValueChange={handleToggleChange}

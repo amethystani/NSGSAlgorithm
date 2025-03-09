@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,14 +10,18 @@ import {
   RefreshControl,
   ActivityIndicator,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Download, Eye } from 'lucide-react-native';
+import { Download, Eye, Trash2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as MediaLibrary from 'expo-media-library';
 import { useTheme } from '@/context/ThemeContext';
-import { getProcessedImages, downloadProcessedImage, ProcessedImage } from '@/api';
+import { getProcessedImages, downloadProcessedImage, deleteProcessedImage } from '@/api';
+import { ProcessedImage } from '@/api/types';
 import { triggerHaptic, triggerHapticNotification } from '@/utils/haptics';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { PinchGestureView } from '../../components/PinchGestureView';
 
 const windowWidth = Dimensions.get('window').width;
 const imageSize = (windowWidth - 60) / 2; // 2 images per row with padding
@@ -28,6 +32,7 @@ export default function GalleryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<ProcessedImage | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const { theme, isDarkMode } = useTheme();
 
   const fetchImages = useCallback(async () => {
@@ -60,7 +65,7 @@ export default function GalleryScreen() {
       // Request permission
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        console.log('Permission not granted');
+        Alert.alert('Permission Denied', 'Photo library access is required to save images.');
         return;
       }
       
@@ -72,13 +77,54 @@ export default function GalleryScreen() {
       
       // Success feedback
       triggerHapticNotification(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Success', 'Image saved to your photo library');
       
       console.log('Image saved to gallery');
     } catch (err) {
       console.error('Error saving image:', err);
       triggerHapticNotification(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Error', 'Failed to save image to gallery');
     }
   }, []);
+
+  // Handle image deletion
+  const handleDelete = useCallback((image: ProcessedImage) => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    
+    Alert.alert(
+      'Delete Image',
+      `Are you sure you want to delete this image? This action cannot be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setDeleting(image.name);
+              await deleteProcessedImage(image.name);
+              // Remove the image from the state
+              setImages(prevImages => prevImages.filter(img => img.name !== image.name));
+              // Close preview if this was the selected image
+              if (selectedImage && selectedImage.name === image.name) {
+                setSelectedImage(null);
+              }
+              triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+            } catch (error) {
+              console.error('Failed to delete image:', error);
+              Alert.alert('Error', 'Failed to delete image. Please try again.');
+            } finally {
+              setDeleting(null);
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
+  }, [selectedImage]);
 
   const handleImagePress = useCallback((image: ProcessedImage) => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
@@ -104,92 +150,163 @@ export default function GalleryScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-      <ScrollView
-        contentContainerStyle={styles.container}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={theme.text}
-          />
-        }
-      >
-        <Text style={[styles.title, { color: theme.text }]}>Object Detection Gallery</Text>
-        
-        {error && (
-          <Text style={[styles.errorText, { color: theme.error }]}>
-            {error}
-          </Text>
-        )}
-        
-        {images.length === 0 && !error ? (
-          <View style={styles.emptyContainer}>
-            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-              Your gallery is empty
-            </Text>
-            <Text style={[styles.emptySubtext, { color: theme.textSecondary }]}>
-              Processed images will appear here
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.galleryGrid}>
-            {images.map((image, index) => (
-              <TouchableOpacity
-                key={image.name + index}
-                style={[styles.imageCard, { backgroundColor: theme.card }]}
-                onPress={() => handleImagePress(image)}
-                activeOpacity={0.8}
-              >
-                <Image
-                  source={{ uri: image.url }}
-                  style={styles.thumbnail}
-                  resizeMode="cover"
-                />
-                <View style={styles.imageOverlay}>
-                  <TouchableOpacity
-                    style={[styles.actionButton, { backgroundColor: theme.primary }]}
-                    onPress={() => handleDownload(image)}
-                  >
-                    <Download size={16} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-      </ScrollView>
-      
-      {/* Image Preview Modal */}
-      {selectedImage && (
-        <View style={[styles.previewContainer, { backgroundColor: isDarkMode ? 'rgba(0,0,0,0.9)' : 'rgba(0,0,0,0.7)' }]}>
-          <TouchableOpacity
-            style={styles.closePreview}
-            onPress={handleClosePreview}
-          >
-            <Text style={styles.closeText}>×</Text>
-          </TouchableOpacity>
-          
-          <View style={styles.previewImageContainer}>
-            <Image
-              source={{ uri: selectedImage.url }}
-              style={styles.previewImage}
-              resizeMode="contain"
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <ScrollView
+          contentContainerStyle={styles.container}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={theme.text}
             />
+          }
+        >
+          <Text style={[styles.title, { color: theme.text }]}>Gallery</Text>
+          
+          {error && (
+            <Text style={[styles.errorText, { color: theme.error }]}>
+              {error}
+            </Text>
+          )}
+          
+          {images.length === 0 && !error ? (
+            <View style={styles.emptyContainer}>
+              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+                Your gallery is empty
+              </Text>
+              <Text style={[styles.emptySubtext, { color: theme.textSecondary }]}>
+                Processed images will appear here
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.galleryGrid}>
+              {images.map((image, index) => {
+                const isDeleting = deleting === image.name;
+                
+                return (
+                  <TouchableOpacity
+                    key={image.name + index}
+                    style={[
+                      styles.imageCard, 
+                      { 
+                        backgroundColor: theme.card,
+                        shadowColor: isDarkMode ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.2)',
+                      }
+                    ]}
+                    onPress={() => handleImagePress(image)}
+                    activeOpacity={0.8}
+                    disabled={isDeleting}
+                  >
+                    <View style={styles.imageCardInner}>
+                      <Image
+                        source={{ uri: image.url }}
+                        style={[
+                          styles.thumbnail,
+                          isDeleting && { opacity: 0.5 }
+                        ]}
+                        resizeMode="cover"
+                      />
+                      
+                      {isDeleting && (
+                        <View style={styles.deletingOverlay}>
+                          <ActivityIndicator size="large" color="#fff" />
+                        </View>
+                      )}
+                      
+                      <View style={styles.imageOverlay}>
+                        <View style={styles.actionButtonsRow}>
+                          <TouchableOpacity
+                            style={[styles.actionButton, { 
+                              backgroundColor: isDarkMode ? theme.card : '#f5f5f5',
+                              marginLeft: 8 
+                            }]}
+                            onPress={() => handleDownload(image)}
+                            disabled={isDeleting}
+                          >
+                            <Download size={16} color={theme.primary} />
+                          </TouchableOpacity>
+                          
+                          <TouchableOpacity
+                            style={[styles.actionButton, { 
+                              backgroundColor: isDarkMode ? theme.card : '#f5f5f5',
+                              marginLeft: 8 
+                            }]}
+                            onPress={() => handleDelete(image)}
+                            disabled={isDeleting}
+                          >
+                            <Trash2 size={16} color="#F44336" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+        </ScrollView>
+        
+        {/* Image Preview Modal */}
+        {selectedImage && (
+          <View style={[styles.previewContainer, { backgroundColor: isDarkMode ? 'rgba(0,0,0,0.95)' : 'rgba(0,0,0,0.85)' }]}>
+            {/* Top action buttons row */}
+            <View style={styles.previewActions}>
+              <TouchableOpacity
+                style={[styles.actionButton, { 
+                  backgroundColor: isDarkMode ? theme.card : '#f5f5f5'
+                }]}
+                onPress={() => handleClosePreview()}
+              >
+                <Text style={[styles.closeText, { color: isDarkMode ? '#fff' : '#333' }]}>×</Text>
+              </TouchableOpacity>
+              
+              <View style={styles.rightButtonsGroup}>
+                <TouchableOpacity
+                  style={[styles.actionButton, { 
+                    backgroundColor: isDarkMode ? theme.card : '#f5f5f5',
+                    marginLeft: 10,
+                  }]}
+                  onPress={() => handleDownload(selectedImage)}
+                >
+                  <Download size={18} color={theme.primary} />
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.actionButton, { 
+                    backgroundColor: isDarkMode ? theme.card : '#f5f5f5',
+                    marginLeft: 10,
+                  }]}
+                  onPress={() => handleDelete(selectedImage)}
+                >
+                  <Trash2 size={18} color="#F44336" />
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            <SafeAreaView style={styles.previewContent}>
+              <View style={styles.previewImageContainer}>
+                <PinchGestureView>
+                  <Image
+                    source={{ uri: selectedImage.url }}
+                    style={styles.previewImage}
+                    resizeMode="contain"
+                  />
+                </PinchGestureView>
+              </View>
+              
+              <Text style={styles.previewName} numberOfLines={1}>
+                {selectedImage.name.split('_')[0]}
+              </Text>
+              
+              <Text style={styles.zoomHint}>
+                Pinch to zoom • Double tap to reset
+              </Text>
+            </SafeAreaView>
           </View>
-          
-          <Text style={styles.previewName}>{selectedImage.name}</Text>
-          
-          <TouchableOpacity
-            style={[styles.downloadButton, { backgroundColor: theme.primary }]}
-            onPress={() => handleDownload(selectedImage)}
-          >
-            <Download size={20} color="#fff" />
-            <Text style={styles.downloadText}>Save to Gallery</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </SafeAreaView>
+        )}
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
@@ -207,8 +324,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 36,
+    fontWeight: '800',
+    letterSpacing: -0.5,
     marginBottom: 20,
   },
   errorText: {
@@ -238,23 +356,47 @@ const styles = StyleSheet.create({
   imageCard: {
     width: imageSize,
     height: imageSize,
-    borderRadius: 12,
-    overflow: 'hidden',
+    borderRadius: 16,
     marginBottom: 20,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  imageCardInner: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   thumbnail: {
     width: '100%',
     height: '100%',
+    borderRadius: 16,
   },
   imageOverlay: {
     position: 'absolute',
     bottom: 10,
     right: 10,
   },
+  actionButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   actionButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deletingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -266,31 +408,62 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
   },
-  closePreview: {
+  previewContent: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: Platform.OS === 'ios' ? 0 : 20,
+  },
+  previewActions: {
     position: 'absolute',
-    top: 50,
-    right: 20,
+    top: Platform.OS === 'ios' ? 50 : 30,
+    left: 0,
+    right: 0,
     zIndex: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    width: '100%',
+    height: 36,
+  },
+  rightButtonsGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   closeText: {
-    color: 'white',
-    fontSize: 36,
-    fontWeight: 'bold',
+    fontSize: 22,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 24,
   },
   previewImageContainer: {
     width: '100%',
     height: '70%',
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#000',
   },
   previewImage: {
     width: '100%',
     height: '100%',
+    borderRadius: 16,
   },
   previewName: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 18,
+    fontWeight: '600',
     marginTop: 20,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  zoomHint: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    marginTop: 8,
     textAlign: 'center',
   },
   downloadButton: {

@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { Platform } from 'react-native';
 
 // Determine the correct API URL based on platform
@@ -20,7 +21,7 @@ const API_URL = getApiUrl();
 console.log(`Using API URL: ${API_URL}`);
 
 // Helper function to create a fetch request with timeout
-const fetchWithTimeout = async (url, options = {}, timeout = 30000) => {
+const fetchWithTimeout = async (url, options = {}, timeout = 120000) => {
   const controller = new AbortController();
   const signal = controller.signal;
   
@@ -123,14 +124,19 @@ export const debugUploadImage = async (imageUri) => {
       }
     } else {
       // Native platforms (iOS/Android)
-      console.log('Native platform detected, using FileSystem.readAsStringAsync');
+      console.log('Native platform detected, using ImageManipulator');
       
       // For React Native, we need to get the actual image data as base64
       let imageBase64;
       try {
-        imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        // First, compress the image more aggressively for large images
+        const manipulateResult = await ImageManipulator.manipulateAsync(
+          imageUri,
+          [{ resize: { width: 800 } }],
+          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        );
+        
+        imageBase64 = manipulateResult.base64;
         console.log(`Read base64 data with length: ${imageBase64.length}`);
       } catch (readError) {
         console.error('Error reading image file:', readError);
@@ -177,6 +183,32 @@ export const debugUploadImage = async (imageUri) => {
   }
 };
 
+// Define the ProcessedImage type
+/**
+ * @typedef {Object} ProcessedImage
+ * @property {string} name - The name of the image
+ * @property {string} url - The URL of the processed image
+ * @property {number} [processingTime] - The time taken to process the image in seconds
+ */
+
+// Define the ProcessedImageResult type
+/**
+ * @typedef {Object} ProcessedImageResult
+ * @property {string} [fullUrl] - The full URL of the processed image
+ * @property {string} [processedImageUrl] - The relative URL of the processed image
+ * @property {boolean} [isFallback] - Whether the result is a fallback
+ * @property {string} [warning] - A warning message if there was an issue
+ * @property {string} [message] - A message about the processing
+ * @property {number} [processingTime] - The time taken to process the image in seconds
+ */
+
+/**
+ * @typedef {Object} DebugUploadResult
+ * @property {Object} [file] - Information about the uploaded file
+ * @property {string} [file.originalname] - The original name of the file
+ * @property {number} [file.size] - The size of the file in bytes
+ */
+
 /**
  * Process an image with YOLOv8
  * @param {string} imageUri - Local URI of the image to process
@@ -221,6 +253,8 @@ export const processImage = async (imageUri, modelType = 'yolov8m') => {
         
         console.log(`Sending web fetch request to: ${API_URL}/process`);
         
+        const startTime = Date.now();
+        
         const result = await fetchWithTimeout(`${API_URL}/process`, {
           method: 'POST',
           body: formData,
@@ -237,6 +271,20 @@ export const processImage = async (imageUri, modelType = 'yolov8m') => {
         });
         
         console.log('Processing result:', result);
+        
+        // Calculate and add processing time
+        const endTime = Date.now();
+        const processingTime = Math.round((endTime - startTime) / 1000);
+        result.processingTime = processingTime;
+        
+        // Add a timestamp to the URL to prevent caching
+        if (result.fullUrl) {
+          result.fullUrl = `${result.fullUrl}?t=${new Date().getTime()}`;
+        }
+        if (result.processedImageUrl) {
+          result.processedImageUrl = `${result.processedImageUrl}?t=${new Date().getTime()}`;
+        }
+        
         return result;
       } catch (error) {
         console.error('Error in web image processing:', error);
@@ -244,14 +292,23 @@ export const processImage = async (imageUri, modelType = 'yolov8m') => {
       }
     } else {
       // Native platforms (iOS/Android)
-      console.log('Native platform detected, using FileSystem.readAsStringAsync');
+      console.log('Native platform detected, using ImageManipulator');
       
       // For React Native, we need to get the actual image data as base64
       let imageBase64;
       try {
-        imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        // First, compress the image more aggressively for large images
+        const manipulateResult = await ImageManipulator.manipulateAsync(
+          imageUri,
+          [{ resize: { width: 1600 } }],
+          { 
+            compress: 0.95,
+            format: ImageManipulator.SaveFormat.JPEG, 
+            base64: true 
+          }
+        );
+        
+        imageBase64 = manipulateResult.base64;
         console.log(`Read base64 data with length: ${imageBase64.length}`);
       } catch (readError) {
         console.error('Error reading image file:', readError);
@@ -279,6 +336,8 @@ export const processImage = async (imageUri, modelType = 'yolov8m') => {
       
       try {
         // Use fetch with the base64 data and increased timeout
+        const startTime = Date.now();
+        
         const response = await fetchWithTimeout(`${API_URL}/process`, {
           method: 'POST',
           body: formData,
@@ -288,7 +347,7 @@ export const processImage = async (imageUri, modelType = 'yolov8m') => {
             'Pragma': 'no-cache',
             'Expires': '0',
           }
-        }, 60000); // Increased timeout to 60 seconds for segmentation
+        }, 180000); // Increased timeout to 180 seconds (3 minutes) for thorough segmentation
         
         if (!response.ok) {
           const text = await response.text();
@@ -298,6 +357,11 @@ export const processImage = async (imageUri, modelType = 'yolov8m') => {
         
         const result = await response.json();
         console.log('Processing result:', result);
+        
+        // Calculate and add processing time
+        const endTime = Date.now();
+        const processingTime = Math.round((endTime - startTime) / 1000);
+        result.processingTime = processingTime;
         
         // Add a timestamp to the URL to prevent caching
         if (result.fullUrl) {
@@ -394,6 +458,38 @@ export const downloadProcessedImage = async (imageUrl, filename) => {
     return fileUri;
   } catch (error) {
     console.error('Error downloading image:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a processed image from the server
+ * @param {string} filename - Name of the image to delete
+ * @returns {Promise<Object>} - Result of the delete operation
+ */
+export const deleteProcessedImage = async (filename) => {
+  try {
+    console.log(`Deleting image: ${filename}`);
+    
+    const response = await fetchWithTimeout(`${API_URL}/processed/${filename}`, {
+      method: 'DELETE',
+      headers: {
+        'Accept': 'application/json',
+      }
+    }, 10000); // 10 second timeout
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error(`Failed to delete image: ${JSON.stringify(errorData)}`);
+      throw new Error(errorData.error || 'Failed to delete image');
+    }
+    
+    const data = await response.json();
+    console.log(`Successfully deleted image: ${filename}`);
+    
+    return data;
+  } catch (error) {
+    console.error('Error deleting image:', error);
     throw error;
   }
 }; 
