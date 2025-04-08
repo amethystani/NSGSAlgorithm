@@ -492,13 +492,40 @@ function processImageFile(req, res) {
     console.log(`Using model type: ${modelType}`);
     
     // Check if using the optimized parallel approach (NSGS)
-    const useOptimizedParallel = req.body.useOptimizedParallel === 'true' || 
-                                req.body.useOptimizedParallel === true ||
-                                req.body.useOptimizedParallel === 'True' ||
-                                req.body.useOptimizedParallel === 'YES' ||
-                                req.body.useOptimizedParallel === 'yes';
+    let useOptimizedParallel;
+    
+    // Check exact raw value for debugging
+    console.log(`Raw NSGS flag debug:
+    - useNSGS Value: ${req.body.useNSGS}
+    - Type: ${typeof req.body.useNSGS}
+    - String representation: "${String(req.body.useNSGS)}"
+    - JSON.stringify: ${JSON.stringify(req.body.useNSGS)}
+    - Double equals false: ${req.body.useNSGS == false}
+    - Triple equals false: ${req.body.useNSGS === false}
+    - Double equals "false": ${req.body.useNSGS == "false"}
+    - Triple equals "false": ${req.body.useNSGS === "false"}
+    `);
+    
+    // Explicitly handle different formats of true/false values
+    if (req.body.useNSGS === 'false' || 
+        req.body.useNSGS === false || 
+        req.body.useNSGS === 'False' || 
+        req.body.useNSGS === 'NO' || 
+        req.body.useNSGS === 'no') {
+      useOptimizedParallel = false;
+    } else if (req.body.useNSGS === 'true' || 
+               req.body.useNSGS === true || 
+               req.body.useNSGS === 'True' || 
+               req.body.useNSGS === 'YES' || 
+               req.body.useNSGS === 'yes') {
+      useOptimizedParallel = true;
+    } else {
+      // Default to false if value is undefined or unexpected
+      useOptimizedParallel = false;
+    }
+    
     console.log(`Using optimized parallel approach (NSGS): ${useOptimizedParallel ? 'Yes' : 'No'}`);
-    console.log(`Raw useOptimizedParallel value: ${req.body.useOptimizedParallel} (${typeof req.body.useOptimizedParallel})`);
+    console.log(`Raw NSGS flag value: ${req.body.useNSGS} (${typeof req.body.useNSGS})`);
     
     // Ensure model type is valid, defaulting to segmentation if not
     modelType = ['yolov8m', 'yolov8m-seg'].includes(modelType) ? modelType : 'yolov8m-seg';
@@ -610,7 +637,7 @@ function processImageFile(req, res) {
         processedImageName: processedName,
         fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
         processingTime: processingTime,
-        usedOptimizedParallel: useOptimizedParallel
+        usedNSGS: useOptimizedParallel
       });
     }
 
@@ -991,7 +1018,7 @@ function processImageFile(req, res) {
             height: height,
             suffix: suffix, // Indicates model type (m for detection, ms for segmentation)
             isFallback: useDetectionFallback,
-            usedOptimizedParallel: useOptimizedParallel
+            usedNSGS: useOptimizedParallel
           }));
           console.log(`Saved enhanced metadata to: ${metadataPath}`);
         } catch (metaError) {
@@ -1011,7 +1038,7 @@ function processImageFile(req, res) {
           processedImageName: expectedProcessedName,
           fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
           processingTime: processingTime,
-          usedOptimizedParallel: useOptimizedParallel
+          usedNSGS: useOptimizedParallel
         });
       }
       

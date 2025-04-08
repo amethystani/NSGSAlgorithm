@@ -229,14 +229,21 @@ export const debugUploadImage = async (imageUri) => {
  * Process an image with YOLOv8
  * @param {string} imageUri - Local URI of the image to process
  * @param {string} modelType - The model to use (yolov8m or yolov8m-seg)
- * @param {boolean} useOptimizedParallel - Whether to use the NSGS approach
+ * @param {boolean} useNSGS - Whether to use the NSGS approach
  * @returns {Promise<ProcessedImageResult>} - Result with processed image URL
  */
-export const processImage = async (imageUri, modelType = 'yolov8m-seg', useOptimizedParallel = true) => {
+export const processImage = async (imageUri, modelType = 'yolov8m-seg', useNSGS = false) => {
   try {
-    console.log(`Processing image with model: ${modelType}, NSGS: ${useOptimizedParallel ? 'Enabled ✓' : 'Disabled'}`);
-    if (useOptimizedParallel) {
+    // Ensure useNSGS is a boolean
+    const nsgsEnabled = useNSGS === true;
+    
+    console.log(`Processing image with model: ${modelType}, NSGS: ${nsgsEnabled ? 'Enabled ✓' : 'Disabled ✗'}`);
+    console.log(`NSGS flag: ${nsgsEnabled} (${typeof nsgsEnabled})`);
+    
+    if (nsgsEnabled) {
       console.log('Using NSGS (Neuro-Scheduling for Graph Segmentation) for optimized parallel processing');
+    } else {
+      console.log('Using STANDARD processing without NSGS optimization');
     }
     
     // Get the filename from the URI
@@ -257,10 +264,14 @@ export const processImage = async (imageUri, modelType = 'yolov8m-seg', useOptim
         
         formData.append('image', blob, filename);
         formData.append('modelType', modelType);
-        formData.append('useOptimizedParallel', String(useOptimizedParallel));
+        // Very explicitly set the useNSGS value with extra logging
+        console.log(`About to append useNSGS (web): ${nsgsEnabled} (${typeof nsgsEnabled})`);
+        const nsgsStringValue = nsgsEnabled === true ? 'true' : 'false';
+        console.log(`String value to send (web): "${nsgsStringValue}"`);
+        formData.append('useNSGS', nsgsStringValue);
         
         console.log(`Sending web fetch request to: ${API_URL}/process`);
-        console.log(`Using NSGS optimization: ${useOptimizedParallel ? 'YES' : 'NO'}`);
+        console.log(`Using NSGS optimization: ${nsgsEnabled ? 'YES' : 'NO'}`);
         
         const result = await fetchWithTimeout(`${API_URL}/process`, {
           method: 'POST',
@@ -300,7 +311,7 @@ export const processImage = async (imageUri, modelType = 'yolov8m-seg', useOptim
         formData.append('imageBase64', base64Data);
         formData.append('filename', filename);
         formData.append('modelType', modelType);
-        formData.append('useOptimizedParallel', useOptimizedParallel.toString());
+        formData.append('useNSGS', nsgsEnabled ? 'true' : 'false');
         
         // Get file extension from mime type in data URI
         const mimeType = imageUri.split(',')[0].split(':')[1].split(';')[0];
@@ -340,11 +351,15 @@ export const processImage = async (imageUri, modelType = 'yolov8m-seg', useOptim
           formData.append('filename', filename);
           formData.append('mimeType', mimeType);
           formData.append('modelType', modelType);
-          formData.append('useOptimizedParallel', String(useOptimizedParallel));
+          // Very explicitly set the useNSGS value with extra logging
+          console.log(`About to append useNSGS: ${nsgsEnabled} (${typeof nsgsEnabled})`);
+          const nsgsStringValue = nsgsEnabled === true ? 'true' : 'false';
+          console.log(`String value to send: "${nsgsStringValue}"`);
+          formData.append('useNSGS', nsgsStringValue);
           
           // Send the request to the server
           console.log(`Sending request to: ${API_URL}/process with base64 data`);
-          console.log(`Using NSGS optimization: ${useOptimizedParallel ? 'YES' : 'NO'}`);
+          console.log(`Using NSGS optimization: ${nsgsEnabled ? 'YES' : 'NO'}`);
           
           const response = await fetchWithTimeout(`${API_URL}/process`, {
             method: 'POST',

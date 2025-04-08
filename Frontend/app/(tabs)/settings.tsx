@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Switch, Pressable, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Switch, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Moon, Sun } from 'lucide-react-native';
@@ -78,14 +78,55 @@ export default function SettingsScreen() {
   // Handler for NSGS toggle switch with haptic feedback
   const handleNSGSToggleChange = (newValue: boolean) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    console.log(`NSGS toggle changed from ${useOptimizedParallel} to ${newValue}`);
     setUseOptimizedParallel(newValue);
     
     // Store the preference in async storage for persistence
     try {
-      AsyncStorage.setItem('useOptimizedParallel', JSON.stringify(newValue));
+      console.log(`Saving NSGS preference to AsyncStorage: ${newValue}`);
+      // Just stringify the actual value directly
+      const valueToStore = JSON.stringify(newValue);
+      console.log(`Stringified value being stored: ${valueToStore}`);
+      AsyncStorage.setItem('useOptimizedParallel', valueToStore).then(() => {
+        // Verify storage
+        AsyncStorage.getItem('useOptimizedParallel').then((verifyValue) => {
+          console.log(`Verified stored value: ${verifyValue}`);
+        });
+      });
     } catch (e) {
       console.error('Failed to save NSGS preference:', e);
     }
+  };
+
+  // Force reset AsyncStorage NSGS setting on multiple presses
+  const [consecutivePresses, setConsecutivePresses] = useState(0);
+  const [lastPressTime, setLastPressTime] = useState(0);
+
+  const handleNSGSResetOnMultiplePress = () => {
+    const now = Date.now();
+    // If pressed within 500ms of last press, count as consecutive
+    if (now - lastPressTime < 500) {
+      const newCount = consecutivePresses + 1;
+      setConsecutivePresses(newCount);
+      
+      // After 5 quick presses, reset the value
+      if (newCount >= 5) {
+        console.log('Resetting NSGS preference due to multiple presses');
+        // Force it to false
+        AsyncStorage.setItem('useOptimizedParallel', 'false').then(() => {
+          console.log('NSGS preference forcibly reset to false');
+          setUseOptimizedParallel(false);
+          setConsecutivePresses(0);
+          // Show feedback
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          Alert.alert('NSGS Preference Reset', 'The NSGS setting has been reset to OFF');
+        });
+      }
+    } else {
+      // Reset counter if too much time passed
+      setConsecutivePresses(1);
+    }
+    setLastPressTime(now);
   };
 
   // Handler for theme toggle
@@ -105,8 +146,11 @@ export default function SettingsScreen() {
     const loadNsgsPreference = async () => {
       try {
         const storedValue = await AsyncStorage.getItem('useOptimizedParallel');
+        console.log(`Settings screen loaded NSGS preference: ${storedValue}`);
         if (storedValue !== null) {
-          setUseOptimizedParallel(JSON.parse(storedValue));
+          const parsedValue = JSON.parse(storedValue);
+          console.log(`Settings screen parsed NSGS value: ${parsedValue} (${typeof parsedValue})`);
+          setUseOptimizedParallel(parsedValue);
         }
       } catch (e) {
         console.error('Failed to load NSGS preference:', e);
@@ -208,6 +252,7 @@ export default function SettingsScreen() {
                 trackColor={{ false: '#D1D1D6', true: theme.primary }}
                 thumbColor={'#FFFFFF'}
                 ios_backgroundColor="#D1D1D6"
+                onChange={handleNSGSResetOnMultiplePress}
               />
             </SettingItem>
           </View>

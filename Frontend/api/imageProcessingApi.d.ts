@@ -36,6 +36,6 @@ export interface DebugUploadResult {
 export function getApiUrl(): string;
 export function testApiConnection(): Promise<boolean>;
 export function debugUploadImage(imageUri: string): Promise<DebugUploadResult>;
-export function processImage(imageUri: string, modelType?: string, useOptimizedParallel?: boolean): Promise<ProcessedImageResult>;
+export function processImage(imageUri: string, modelType?: string, useNSGS?: boolean): Promise<ProcessedImageResult>;
 export function getProcessedImages(): Promise<ProcessedImage[]>;
 export function downloadProcessedImage(imageUrl: string, filename: string): Promise<string>; 

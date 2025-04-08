@@ -30,7 +30,7 @@ export interface ProcessedImageResult {
   fullUrl?: string;
   isFallback?: boolean;
   processingTime?: number;
-  usedOptimizedParallel?: boolean;
+  usedNSGS?: boolean;
 }
 
 /**

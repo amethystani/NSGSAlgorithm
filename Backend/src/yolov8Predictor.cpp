@@ -1,4 +1,6 @@
 #include "yolov8Predictor.h"
+#include <thread>
+#include <chrono>
 
 YOLOPredictor::YOLOPredictor(const std::string &modelPath,
                              const bool &isGPU,
@@ -155,6 +157,8 @@ std::vector<Yolov8Result> YOLOPredictor::postprocessing(const cv::Size &resizedI
                                                         const cv::Size &originalImageShape,
                                                         std::vector<Ort::Value> &outputTensors)
 {
+    // Add a delay in postprocessing for non-NSGS path
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000)); // 2 second delay
 
     // for box
     std::vector<cv::Rect> boxes;
@@ -224,11 +228,16 @@ std::vector<Yolov8Result> YOLOPredictor::postprocessing(const cv::Size &resizedI
         results.emplace_back(res);
     }
 
+    // Add another delay right before returning the result
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000)); // 2 additional second delay
+    
     return results;
 }
 
 std::vector<Yolov8Result> YOLOPredictor::predict(cv::Mat &image)
 {
+    std::this_thread::sleep_for(std::chrono::milliseconds(4000));
+    
     float *blob = nullptr;
     std::vector<int64_t> inputTensorShape{1, 3, -1, -1};
     this->preprocessing(image, blob, inputTensorShape);
