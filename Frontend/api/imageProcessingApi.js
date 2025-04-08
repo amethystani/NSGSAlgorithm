@@ -12,7 +12,7 @@ export const getApiUrl = () => {
   
   // For devices (iOS/Android), use the network IP
   // This is the actual IP address of your machine on the network
-  const DEVICE_IP = '10.79.104.80';
+  const DEVICE_IP = '10.79.107.65';
   
   return `http://${DEVICE_IP}:3000`;
 };

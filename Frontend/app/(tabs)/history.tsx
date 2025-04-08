@@ -104,15 +104,23 @@ export default function HistoryScreen() {
 
   // Extract model name for display
   const getModelDisplayName = useCallback((image: ProcessedImage) => {
+    // First priority: use modelTypeName if available
     if (image.modelTypeName) return image.modelTypeName;
-    if (image.modelType === 'yolov8m-seg') return 'Segmentation';
-    if (image.modelType === 'yolov8m') return 'Detection';
     
-    // Extract from filename
-    if (image.name.includes('_ms')) return 'Segmentation';
-    if (image.name.includes('_m')) return 'Detection';
+    // Second priority: use modelType
+    if (image.modelType) {
+      if (image.modelType === 'yolov8m-seg') return 'Segmentation';
+      if (image.modelType === 'yolov8m') return 'Object Detection';
+      return image.modelType; // Return as-is if it's another model type
+    }
     
-    return 'Detection'; // Default
+    // Last resort: try to extract from filename
+    if (image.name) {
+      if (image.name.includes('_ms')) return 'Segmentation';
+      if (image.name.includes('_m')) return 'Object Detection';
+    }
+    
+    return 'Unknown Model'; // More descriptive default
   }, []);
 
   if (loading) {
@@ -164,10 +172,12 @@ export default function HistoryScreen() {
               const modelDisplayName = getModelDisplayName(image);
               const isSegmentation = modelDisplayName === 'Segmentation';
               
-              // Format processing time
+              // Format processing time - Fix for the 34s issue
               const processingTimeDisplay = image.processingTime 
                 ? `${image.processingTime}s` 
-                : 'Quick process';
+                : image.processingTime === 0
+                  ? '< 1s'
+                  : 'Unknown';
               
               // Format date
               const processedDate = image.processedDate || 'Recent';
@@ -229,7 +239,7 @@ export default function HistoryScreen() {
                       <View style={styles.historyCardDetailRow}>
                         <Clock size={14} color={theme.textSecondary} />
                         <Text style={[styles.historyCardDetailText, { color: theme.textSecondary }]}>
-                          {processingTimeDisplay}
+                          {processingTimeDisplay !== 'Unknown' ? processingTimeDisplay : 'Time unavailable'}
                         </Text>
                       </View>
                       
@@ -305,7 +315,13 @@ export default function HistoryScreen() {
                             </Text>
                           </View>
                           <Text style={[styles.detailItemValue, { color: theme.textSecondary }]}>
-                            {image.modelType || (isSegmentation ? 'YOLOv8m-seg' : 'YOLOv8m')}
+                            {image.modelType 
+                              ? (image.modelType === 'yolov8m-seg' 
+                                ? 'YOLOv8m Segmentation' 
+                                : image.modelType === 'yolov8m' 
+                                  ? 'YOLOv8m Object Detection' 
+                                  : image.modelType)
+                              : 'Unknown model'}
                           </Text>
                         </View>
                         
@@ -313,11 +329,29 @@ export default function HistoryScreen() {
                           <View style={styles.detailItemHeader}>
                             <Clock size={14} color={theme.primary} />
                             <Text style={[styles.detailItemLabel, { color: theme.text }]}>
-                              Processed
+                              Processing Time
                             </Text>
                           </View>
                           <Text style={[styles.detailItemValue, { color: theme.textSecondary }]}>
-                            {image.processedTime || 'Today'}
+                            {image.processingTime 
+                              ? `${image.processingTime} seconds` 
+                              : image.processingTime === 0
+                                ? 'Less than 1 second'
+                                : 'Not available'}
+                          </Text>
+                        </View>
+                      </View>
+                      
+                      <View style={[styles.detailsRow]}>
+                        <View style={styles.detailItem}>
+                          <View style={styles.detailItemHeader}>
+                            <Calendar size={14} color={theme.primary} />
+                            <Text style={[styles.detailItemLabel, { color: theme.text }]}>
+                              Processed On
+                            </Text>
+                          </View>
+                          <Text style={[styles.detailItemValue, { color: theme.textSecondary }]}>
+                            {image.processedDate || 'Unknown date'}
                           </Text>
                         </View>
                       </View>
@@ -334,7 +368,7 @@ export default function HistoryScreen() {
                           <>
                             <CheckCircle size={16} color="#4caf50" />
                             <Text style={[styles.statusText, { color: '#2e7d32' }]}>
-                              Successfully processed with {isSegmentation ? 'segmentation' : 'detection'} model
+                              Successfully processed with {isSegmentation ? 'segmentation' : 'object detection'} model
                             </Text>
                           </>
                         )}
