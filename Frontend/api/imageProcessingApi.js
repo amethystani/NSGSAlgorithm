@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 // Determine the correct API URL based on platform
 // Use the specific IP address for all devices when testing with Expo Go
 export const getApiUrl = () => {
-  // Use localhost for web
+  // Use localhost for web and for local testing
   if (Platform.OS === 'web') {
     return 'http://localhost:3000';
   }
@@ -21,26 +21,42 @@ const API_URL = getApiUrl();
 console.log(`Using API URL: ${API_URL}`);
 
 // Helper function to create a fetch request with timeout
-const fetchWithTimeout = async (url, options = {}, timeout = 120000) => {
+const fetchWithTimeout = async (url, options = {}, timeout = 120000, retries = 3) => {
   const controller = new AbortController();
   const signal = controller.signal;
   
   const timeoutId = setTimeout(() => controller.abort(), timeout);
   
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal
-    });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error(`Request timed out after ${timeout}ms`);
+  let lastError;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal
+      });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (error) {
+      lastError = error;
+      console.log(`Fetch attempt ${attempt + 1}/${retries} failed:`, error.message);
+      
+      // Don't retry if we aborted deliberately
+      if (error.name === 'AbortError') {
+        clearTimeout(timeoutId);
+        throw new Error(`Request timed out after ${timeout}ms`);
+      }
+      
+      // Wait a bit before retrying
+      if (attempt < retries - 1) {
+        const delay = 1000 * Math.pow(2, attempt); // Exponential backoff
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
-    throw error;
   }
+  
+  clearTimeout(timeoutId);
+  throw lastError || new Error('Failed to fetch after multiple attempts');
 };
 
 /**
@@ -212,23 +228,15 @@ export const debugUploadImage = async (imageUri) => {
 /**
  * Process an image with YOLOv8
  * @param {string} imageUri - Local URI of the image to process
- * @param {string} modelType - Model type to use ('yolov8m' or 'yolov8m-seg')
- * @returns {Promise<Object>} - Result with processed image information
+ * @param {string} modelType - The model to use (yolov8m or yolov8m-seg)
+ * @param {boolean} useOptimizedParallel - Whether to use the NSGS approach
+ * @returns {Promise<ProcessedImageResult>} - Result with processed image URL
  */
-export const processImage = async (imageUri, modelType = 'yolov8m') => {
+export const processImage = async (imageUri, modelType = 'yolov8m-seg', useOptimizedParallel = true) => {
   try {
-    console.log(`Processing image with URI: ${imageUri} using model: ${modelType}`);
-    
-    // Validate model type
-    if (!['yolov8m', 'yolov8m-seg'].includes(modelType)) {
-      console.warn(`Invalid model type: ${modelType}, defaulting to yolov8m-seg`);
-      modelType = 'yolov8m-seg';
-    }
-    
-    // First test if the API is reachable
-    const isApiConnected = await testApiConnection();
-    if (!isApiConnected) {
-      throw new Error(`Failed to connect to the API at ${API_URL}. Please check if the server is running.`);
+    console.log(`Processing image with model: ${modelType}, NSGS: ${useOptimizedParallel ? 'Enabled ✓' : 'Disabled'}`);
+    if (useOptimizedParallel) {
+      console.log('Using NSGS (Neuro-Scheduling for Graph Segmentation) for optimized parallel processing');
     }
     
     // Get the filename from the URI
@@ -249,11 +257,10 @@ export const processImage = async (imageUri, modelType = 'yolov8m') => {
         
         formData.append('image', blob, filename);
         formData.append('modelType', modelType);
-        console.log(`Model type being sent: ${modelType}`);
+        formData.append('useOptimizedParallel', String(useOptimizedParallel));
         
         console.log(`Sending web fetch request to: ${API_URL}/process`);
-        
-        const startTime = Date.now();
+        console.log(`Using NSGS optimization: ${useOptimizedParallel ? 'YES' : 'NO'}`);
         
         const result = await fetchWithTimeout(`${API_URL}/process`, {
           method: 'POST',
@@ -261,7 +268,7 @@ export const processImage = async (imageUri, modelType = 'yolov8m') => {
           headers: {
             'Accept': 'application/json',
           }
-        }, 60000).then(res => {
+        }, 180000).then(res => {
           if (!res.ok) {
             return res.text().then(text => {
               throw new Error(text || `Server responded with status ${res.status}`);
@@ -270,111 +277,96 @@ export const processImage = async (imageUri, modelType = 'yolov8m') => {
           return res.json();
         });
         
-        console.log('Processing result:', result);
-        
-        // Calculate and add processing time
-        const endTime = Date.now();
-        const processingTime = Math.round((endTime - startTime) / 1000);
-        result.processingTime = processingTime;
-        
-        // Add a timestamp to the URL to prevent caching
-        if (result.fullUrl) {
-          result.fullUrl = `${result.fullUrl}?t=${new Date().getTime()}`;
-        }
-        if (result.processedImageUrl) {
-          result.processedImageUrl = `${result.processedImageUrl}?t=${new Date().getTime()}`;
-        }
-        
+        console.log('Process result:', result);
         return result;
       } catch (error) {
-        console.error('Error in web image processing:', error);
+        console.error('Error in web processing:', error);
         throw error;
       }
     } else {
       // Native platforms (iOS/Android)
-      console.log('Native platform detected, using ImageManipulator');
+      console.log('Native platform detected');
       
-      // For React Native, we need to get the actual image data as base64
-      let imageBase64;
-      try {
-        // First, compress the image more aggressively for large images
-        const manipulateResult = await ImageManipulator.manipulateAsync(
-          imageUri,
-          [{ resize: { width: 1600 } }],
-          { 
-            compress: 0.95,
-            format: ImageManipulator.SaveFormat.JPEG, 
-            base64: true 
-          }
-        );
+      // Possible scenarios:
+      // 1. Image is a local file (file://)
+      // 2. Image is a base64 string
+      // 3. Image is a remote URL
+      
+      if (imageUri.startsWith('data:')) {
+        // This is already a base64 string
+        console.log('Image is a base64 string');
+        const base64Data = imageUri.split(',')[1];
         
-        imageBase64 = manipulateResult.base64;
-        console.log(`Read base64 data with length: ${imageBase64.length}`);
-      } catch (readError) {
-        console.error('Error reading image file:', readError);
-        throw new Error(`Could not read image file: ${readError.message}`);
+        formData.append('imageBase64', base64Data);
+        formData.append('filename', filename);
+        formData.append('modelType', modelType);
+        formData.append('useOptimizedParallel', useOptimizedParallel.toString());
+        
+        // Get file extension from mime type in data URI
+        const mimeType = imageUri.split(',')[0].split(':')[1].split(';')[0];
+        formData.append('mimeType', mimeType);
       }
-      
-      if (!imageBase64 || imageBase64.length === 0) {
-        throw new Error('Failed to read image data as base64');
-      }
-      
-      // Get file extension for mime type
-      const ext = filename.split('.').pop()?.toLowerCase() || 'jpg';
-      const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
-      
-      // Add the image as base64 string
-      formData.append('imageBase64', imageBase64);
-      formData.append('filename', filename);
-      formData.append('mimeType', mimeType);
-      
-      // Add model type explicitly and with better logging
-      console.log(`Setting model type in request to: ${modelType}`);
-      formData.append('modelType', modelType);
-      
-      console.log(`Sending native request to: ${API_URL}/process with base64 data and model type: ${modelType}`);
-      
-      try {
-        // Use fetch with the base64 data and increased timeout
-        const startTime = Date.now();
-        
-        const response = await fetchWithTimeout(`${API_URL}/process`, {
-          method: 'POST',
-          body: formData,
-          headers: {
-            'Accept': 'application/json',
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0',
+      else {
+        try {
+          // Try to read the file as base64
+          let imageBase64;
+          
+          // First check if we need to resize for performance
+          try {
+            // First, compress the image more aggressively for large images
+            const manipulateResult = await ImageManipulator.manipulateAsync(
+              imageUri,
+              [{ resize: { width: 800 } }],
+              { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+            );
+            
+            imageBase64 = manipulateResult.base64;
+            console.log(`Read base64 data with length: ${imageBase64.length}`);
+          } catch (readError) {
+            console.error('Error processing image file:', readError);
+            throw new Error(`Could not process image file: ${readError.message}`);
           }
-        }, 180000); // Increased timeout to 180 seconds (3 minutes) for thorough segmentation
-        
-        if (!response.ok) {
-          const text = await response.text();
-          console.error(`Server responded with ${response.status}: ${text}`);
-          throw new Error(text || `Server responded with status ${response.status}`);
+          
+          if (!imageBase64 || imageBase64.length === 0) {
+            throw new Error('Failed to read image data as base64');
+          }
+          
+          // Get file extension for mime type
+          const ext = filename.split('.').pop()?.toLowerCase() || 'jpg';
+          const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+          
+          // Add the image as base64 string
+          formData.append('imageBase64', imageBase64);
+          formData.append('filename', filename);
+          formData.append('mimeType', mimeType);
+          formData.append('modelType', modelType);
+          formData.append('useOptimizedParallel', String(useOptimizedParallel));
+          
+          // Send the request to the server
+          console.log(`Sending request to: ${API_URL}/process with base64 data`);
+          console.log(`Using NSGS optimization: ${useOptimizedParallel ? 'YES' : 'NO'}`);
+          
+          const response = await fetchWithTimeout(`${API_URL}/process`, {
+            method: 'POST',
+            body: formData,
+            headers: {
+              'Accept': 'application/json',
+            }
+          }, 180000);
+          
+          if (!response.ok) {
+            const text = await response.text();
+            console.error(`Server responded with ${response.status}: ${text}`);
+            throw new Error(text || `Server responded with status ${response.status}`);
+          }
+          
+          const result = await response.json();
+          console.log('Processing result:', result);
+          return result;
+        } catch (error) {
+          console.error('Error processing image:', error);
+          throw error;
         }
-        
-        const result = await response.json();
-        console.log('Processing result:', result);
-        
-        // Calculate and add processing time
-        const endTime = Date.now();
-        const processingTime = Math.round((endTime - startTime) / 1000);
-        result.processingTime = processingTime;
-        
-        // Add a timestamp to the URL to prevent caching
-        if (result.fullUrl) {
-          result.fullUrl = `${result.fullUrl}?t=${new Date().getTime()}`;
-        }
-        if (result.processedImageUrl) {
-          result.processedImageUrl = `${result.processedImageUrl}?t=${new Date().getTime()}`;
-        }
-        
-        return result;
-      } catch (networkError) {
-        console.error('Network error during processing:', networkError);
-        throw new Error(`Network error: ${networkError.message}`);
       }
     }
   } catch (error) {

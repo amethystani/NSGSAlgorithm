@@ -153,6 +153,78 @@ src/main.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/main.cpp.s
 .PHONY : src/main.cpp.s
 
+src/nsgs/NeuronNode.o: src/nsgs/NeuronNode.cpp.o
+.PHONY : src/nsgs/NeuronNode.o
+
+# target to build an object file
+src/nsgs/NeuronNode.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/NeuronNode.cpp.o
+.PHONY : src/nsgs/NeuronNode.cpp.o
+
+src/nsgs/NeuronNode.i: src/nsgs/NeuronNode.cpp.i
+.PHONY : src/nsgs/NeuronNode.i
+
+# target to preprocess a source file
+src/nsgs/NeuronNode.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/NeuronNode.cpp.i
+.PHONY : src/nsgs/NeuronNode.cpp.i
+
+src/nsgs/NeuronNode.s: src/nsgs/NeuronNode.cpp.s
+.PHONY : src/nsgs/NeuronNode.s
+
+# target to generate assembly for a file
+src/nsgs/NeuronNode.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/NeuronNode.cpp.s
+.PHONY : src/nsgs/NeuronNode.cpp.s
+
+src/nsgs/NsgsPredictor.o: src/nsgs/NsgsPredictor.cpp.o
+.PHONY : src/nsgs/NsgsPredictor.o
+
+# target to build an object file
+src/nsgs/NsgsPredictor.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o
+.PHONY : src/nsgs/NsgsPredictor.cpp.o
+
+src/nsgs/NsgsPredictor.i: src/nsgs/NsgsPredictor.cpp.i
+.PHONY : src/nsgs/NsgsPredictor.i
+
+# target to preprocess a source file
+src/nsgs/NsgsPredictor.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.i
+.PHONY : src/nsgs/NsgsPredictor.cpp.i
+
+src/nsgs/NsgsPredictor.s: src/nsgs/NsgsPredictor.cpp.s
+.PHONY : src/nsgs/NsgsPredictor.s
+
+# target to generate assembly for a file
+src/nsgs/NsgsPredictor.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.s
+.PHONY : src/nsgs/NsgsPredictor.cpp.s
+
+src/nsgs/SpikeQueue.o: src/nsgs/SpikeQueue.cpp.o
+.PHONY : src/nsgs/SpikeQueue.o
+
+# target to build an object file
+src/nsgs/SpikeQueue.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.o
+.PHONY : src/nsgs/SpikeQueue.cpp.o
+
+src/nsgs/SpikeQueue.i: src/nsgs/SpikeQueue.cpp.i
+.PHONY : src/nsgs/SpikeQueue.i
+
+# target to preprocess a source file
+src/nsgs/SpikeQueue.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.i
+.PHONY : src/nsgs/SpikeQueue.cpp.i
+
+src/nsgs/SpikeQueue.s: src/nsgs/SpikeQueue.cpp.s
+.PHONY : src/nsgs/SpikeQueue.s
+
+# target to generate assembly for a file
+src/nsgs/SpikeQueue.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.s
+.PHONY : src/nsgs/SpikeQueue.cpp.s
+
 src/utils.o: src/utils.cpp.o
 .PHONY : src/utils.o
 
@@ -213,6 +285,15 @@ help:
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"
+	@echo "... src/nsgs/NeuronNode.o"
+	@echo "... src/nsgs/NeuronNode.i"
+	@echo "... src/nsgs/NeuronNode.s"
+	@echo "... src/nsgs/NsgsPredictor.o"
+	@echo "... src/nsgs/NsgsPredictor.i"
+	@echo "... src/nsgs/NsgsPredictor.s"
+	@echo "... src/nsgs/SpikeQueue.o"
+	@echo "... src/nsgs/SpikeQueue.i"
+	@echo "... src/nsgs/SpikeQueue.s"
 	@echo "... src/utils.o"
 	@echo "... src/utils.i"
 	@echo "... src/utils.s"

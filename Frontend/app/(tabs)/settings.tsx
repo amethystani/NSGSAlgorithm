@@ -11,6 +11,7 @@ import Animated, {
   withTiming 
 } from 'react-native-reanimated';
 import { useTheme } from '@/context/ThemeContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Define types for SettingItem props
 interface SettingItemProps {
@@ -61,6 +62,7 @@ const SettingItem = ({ label, children, last = false }: SettingItemProps) => {
 
 export default function SettingsScreen() {
   const { theme, isDarkMode, toggleTheme, isSystemTheme, setIsSystemTheme } = useTheme();
+  const [useOptimizedParallel, setUseOptimizedParallel] = useState(true); // NSGS toggle - ON by default
   const [useGPU, setUseGPU] = useState(true);
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.4);
   const [iouThreshold, setIouThreshold] = useState(0.4);
@@ -68,9 +70,22 @@ export default function SettingsScreen() {
   const [mounted, setMounted] = useState(false);
 
   // Handler for toggle switch with haptic feedback
-  const handleToggleChange = (newValue: boolean) => {
+  const handleGPUToggleChange = (newValue: boolean) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setUseGPU(newValue);
+  };
+
+  // Handler for NSGS toggle switch with haptic feedback
+  const handleNSGSToggleChange = (newValue: boolean) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setUseOptimizedParallel(newValue);
+    
+    // Store the preference in async storage for persistence
+    try {
+      AsyncStorage.setItem('useOptimizedParallel', JSON.stringify(newValue));
+    } catch (e) {
+      console.error('Failed to save NSGS preference:', e);
+    }
   };
 
   // Handler for theme toggle
@@ -84,6 +99,22 @@ export default function SettingsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsSystemTheme(value);
   };
+
+  // Load stored preferences
+  useEffect(() => {
+    const loadNsgsPreference = async () => {
+      try {
+        const storedValue = await AsyncStorage.getItem('useOptimizedParallel');
+        if (storedValue !== null) {
+          setUseOptimizedParallel(JSON.parse(storedValue));
+        }
+      } catch (e) {
+        console.error('Failed to load NSGS preference:', e);
+      }
+    };
+    
+    loadNsgsPreference();
+  }, []);
 
   // Use a shorter timeout to make UI appear faster
   useEffect(() => {
@@ -161,16 +192,30 @@ export default function SettingsScreen() {
           style={styles.section}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>Processing</Text>
           <View style={[styles.card, { backgroundColor: theme.card, shadowColor: isDarkMode ? 'transparent' : '#000' }]}>
-            <SettingItem label="Use Optimized Parallel Approach" last>
+            <SettingItem label="Use GPU Acceleration">
               <Switch
                 value={useGPU}
-                onValueChange={handleToggleChange}
+                onValueChange={handleGPUToggleChange}
                 trackColor={{ false: '#D1D1D6', true: theme.success }}
                 thumbColor={'#FFFFFF'}
                 ios_backgroundColor="#D1D1D6"
               />
             </SettingItem>
+            <SettingItem label="Use Optimized Parallel Approach" last>
+              <Switch
+                value={useOptimizedParallel}
+                onValueChange={handleNSGSToggleChange}
+                trackColor={{ false: '#D1D1D6', true: theme.primary }}
+                thumbColor={'#FFFFFF'}
+                ios_backgroundColor="#D1D1D6"
+              />
+            </SettingItem>
           </View>
+          {useOptimizedParallel && (
+            <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+              NSGS: Neuro-Scheduling for Graph Segmentation uses an event-driven, asynchronous approach
+            </Text>
+          )}
         </Animated.View>
 
         <Animated.View

@@ -7,10 +7,14 @@ message(STATUS "ONNXRUNTIME_DIR: ${ONNXRUNTIME_DIR}")
 find_package(OpenCV REQUIRED)
 
 include_directories("include/")
+include_directories("src/")
 
 add_executable(yolov8_ort
                src/utils.cpp
                src/yolov8Predictor.cpp
+               src/nsgs/NeuronNode.cpp
+               src/nsgs/SpikeQueue.cpp
+               src/nsgs/NsgsPredictor.cpp
                src/main.cpp)
 
 set(CMAKE_CXX_STANDARD 17)

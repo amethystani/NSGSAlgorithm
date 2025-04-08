@@ -10,6 +10,8 @@ export interface ProcessedImageResult {
   details?: string; // Additional details, especially for errors
   error?: string; // Error message if success is false
   warning?: string; // Warning message for partial success cases
+  processingTime?: number; // Processing time in seconds
+  usedOptimizedParallel?: boolean; // Whether NSGS approach was used
 }
 
 export interface ProcessedImage {
@@ -34,6 +36,6 @@ export interface DebugUploadResult {
 export function getApiUrl(): string;
 export function testApiConnection(): Promise<boolean>;
 export function debugUploadImage(imageUri: string): Promise<DebugUploadResult>;
-export function processImage(imageUri: string, modelType?: string): Promise<ProcessedImageResult>;
+export function processImage(imageUri: string, modelType?: string, useOptimizedParallel?: boolean): Promise<ProcessedImageResult>;
 export function getProcessedImages(): Promise<ProcessedImage[]>;
 export function downloadProcessedImage(imageUrl: string, filename: string): Promise<string>; 

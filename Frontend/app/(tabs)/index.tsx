@@ -28,6 +28,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { processImage, testApiConnection, debugUploadImage, getApiUrl } from '@/api';
 import { ProcessedImageResult, DebugUploadResult } from '@/api/types';
 import { triggerHaptic, triggerHapticNotification } from '@/utils/haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
@@ -52,7 +53,25 @@ export default function DetectScreen() {
   const [debugMode, setDebugMode] = useState(false);
   const [processingTimer, setProcessingTimer] = useState(0);
   const [processingTime, setProcessingTime] = useState<number | null>(null);
+  const [useOptimizedParallel, setUseOptimizedParallel] = useState(true); // NSGS setting - ON by default
+  const [result, setResult] = useState<ProcessedImageResult | null>(null); // Store the API response
   const { theme, isDarkMode } = useTheme();
+
+  // Load NSGS setting from AsyncStorage
+  useEffect(() => {
+    const loadNsgsPreference = async () => {
+      try {
+        const storedValue = await AsyncStorage.getItem('useOptimizedParallel');
+        if (storedValue !== null) {
+          setUseOptimizedParallel(JSON.parse(storedValue));
+        }
+      } catch (e) {
+        console.error('Failed to load NSGS preference:', e);
+      }
+    };
+    
+    loadNsgsPreference();
+  }, []);
 
   // Helper function to create standardized card style with consistent shadows
   const getStandardCardStyle = useCallback((customStyle = {}) => {
@@ -312,8 +331,11 @@ export default function DetectScreen() {
         // Normal processing mode
         try {
           console.log(`Processing with model: ${selectedModel}`);
-          result = await processImage(selectedImage, selectedModel);
+          result = await processImage(selectedImage, selectedModel, useOptimizedParallel);
           console.log('Processing result:', result);
+          
+          // Store the result in state
+          setResult(result);
         } catch (processingError: any) {
           console.error('Image processing error:', processingError);
           throw new Error(`Processing failed: ${processingError.message}`);
@@ -402,7 +424,7 @@ export default function DetectScreen() {
     } finally {
       setProcessing(false);
     }
-  }, [selectedImage, selectedModel, debugMode]);
+  }, [selectedImage, selectedModel, debugMode, useOptimizedParallel]);
 
   // Toggle debug mode
   const toggleDebugMode = useCallback(() => {
@@ -616,6 +638,7 @@ export default function DetectScreen() {
               {processingTime !== null && (
                 <Text style={[styles.processingTimeText, { color: theme.textSecondary }]}>
                   Processed in {processingTime}s
+                  {result && result.usedOptimizedParallel && ' using NSGS'}
                 </Text>
               )}
             </View>

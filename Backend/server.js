@@ -10,11 +10,16 @@ const PORT = process.env.PORT || 3000;
 
 // Enable CORS for all routes
 app.use(cors({
-  origin: '*',  // Allow all origins
+  origin: true,  // Reflects the request origin instead of '*' to better handle credentials
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-  credentials: true
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  exposedHeaders: ['Content-Disposition'],
+  credentials: true,
+  maxAge: 86400 // Cache preflight requests for 24 hours
 }));
+
+// Handle OPTIONS requests explicitly
+app.options('*', cors());
 
 // Parse JSON bodies with increased limits
 app.use(express.json({ limit: '100mb' }));
@@ -323,6 +328,11 @@ app.post('/process', logBodyMiddleware, handleDirectImageUpload, (req, res) => {
       const base64Data = req.body.imageBase64;
       const filepath = path.join(inputDir, filename);
       
+      // Check if base64Data exists before processing
+      if (!base64Data) {
+        throw new Error('No base64 image data provided in the request');
+      }
+      
       // Write the file
       fs.writeFileSync(filepath, Buffer.from(base64Data, 'base64'));
       console.log(`Saved base64 data to file: ${filepath}, size: ${fs.statSync(filepath).size} bytes`);
@@ -481,6 +491,15 @@ function processImageFile(req, res) {
     let modelType = req.body.modelType || 'yolov8m-seg'; // Default to segmentation model if not specified
     console.log(`Using model type: ${modelType}`);
     
+    // Check if using the optimized parallel approach (NSGS)
+    const useOptimizedParallel = req.body.useOptimizedParallel === 'true' || 
+                                req.body.useOptimizedParallel === true ||
+                                req.body.useOptimizedParallel === 'True' ||
+                                req.body.useOptimizedParallel === 'YES' ||
+                                req.body.useOptimizedParallel === 'yes';
+    console.log(`Using optimized parallel approach (NSGS): ${useOptimizedParallel ? 'Yes' : 'No'}`);
+    console.log(`Raw useOptimizedParallel value: ${req.body.useOptimizedParallel} (${typeof req.body.useOptimizedParallel})`);
+    
     // Ensure model type is valid, defaulting to segmentation if not
     modelType = ['yolov8m', 'yolov8m-seg'].includes(modelType) ? modelType : 'yolov8m-seg';
     console.log(`Validated model type: ${modelType}`);
@@ -491,7 +510,6 @@ function processImageFile(req, res) {
     // We'll try segmentation only if explicitly requested and detection works
     let useDetectionFallback = false;
     
-    // Look for ONNX models instead of PyTorch models
     if (modelType === 'yolov8m-seg') {
       // Try to find ONNX segmentation model file
       modelPath = './models/yolov8m-seg.onnx';
@@ -505,7 +523,12 @@ function processImageFile(req, res) {
           useDetectionFallback = true;
         }
       }
-      suffix = 'ms';
+      if (useOptimizedParallel) {
+        console.log('🔄 Using NSGS (Neuro-Scheduling for Graph Segmentation) for optimized parallel processing');
+        suffix = 'nsgs';
+      } else {
+        suffix = 'ms';
+      }
     } 
     
     if (useDetectionFallback || modelType === 'yolov8m') {
@@ -518,7 +541,12 @@ function processImageFile(req, res) {
           modelPath = altPath;
         }
       }
-      suffix = 'm';
+      if (useOptimizedParallel) {
+        console.log('🔄 Using NSGS (Neuro-Scheduling for Graph Segmentation) for optimized detection');
+        suffix = 'nsgs-det';
+      } else {
+        suffix = 'm';
+      }
       if (useDetectionFallback) {
         console.log('Using detection model as fallback');
       }
@@ -581,7 +609,8 @@ function processImageFile(req, res) {
         originalImageName: originalName,
         processedImageName: processedName,
         fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
-        processingTime: processingTime
+        processingTime: processingTime,
+        usedOptimizedParallel: useOptimizedParallel
       });
     }
 
@@ -746,20 +775,49 @@ function processImageFile(req, res) {
       // Continue anyway
     }
 
-    // Command to run the C++ application
-    let command = '';
-    
-    // Since we cleaned the input directory, we can use the directory path
-    const inputDirPath = path.dirname(inputFilePath);
-    
-    if (modelType === 'yolov8m-seg' && !useDetectionFallback) {
-      // For segmentation model
-      console.log('Running with segmentation model');
-      command = `./build/yolov8_ort -m ${modelPath} -i ${inputDirPath} -o ${outputDir} -c ./models/coco.names -x ${suffix}`;
+    // Construct the command to run the C++ executable
+    let command;
+    // Determine if we're using the segmentation model
+    if (modelType === 'yolov8m-seg') {
+      // Check if the ONNX model exists
+      if (fs.existsSync(modelPath)) {
+        // For segmentation model
+        console.log('Running with segmentation model');
+        // Define inputDirPath from the file's directory
+        const inputDirPath = path.dirname(inputFilePath);
+        command = `./build/yolov8_ort -m ${modelPath} -i ${inputDirPath} -o ${outputDir} -c ./models/coco.names -x ${suffix}`;
+        
+        // Add NSGS flag if using optimized parallel approach
+        if (useOptimizedParallel) {
+          command += ' --nsgs';
+          console.log('🔄 Adding NSGS flag to command for parallel processing');
+        }
+      } else {
+        // If segmentation ONNX model doesn't exist, try detection model
+        console.log('Segmentation ONNX model not found. Trying detection model.');
+        modelPath = './models/yolov8m.onnx';
+        suffix = useOptimizedParallel ? 'nsgs-det' : 'm';
+        // Define inputDirPath from the file's directory
+        const inputDirPath = path.dirname(inputFilePath);
+        command = `./build/yolov8_ort -m ${modelPath} -i ${inputDirPath} -o ${outputDir} -c ./models/coco.names -x ${suffix}`;
+        
+        // Add NSGS flag if using optimized parallel approach
+        if (useOptimizedParallel) {
+          command += ' --nsgs';
+          console.log('🔄 Adding NSGS flag to command for parallel processing');
+        }
+      }
     } else {
       // For regular detection model
       console.log('Running with detection model');
+      // Define inputDirPath from the file's directory
+      const inputDirPath = path.dirname(inputFilePath);
       command = `./build/yolov8_ort -m ${modelPath} -i ${inputDirPath} -o ${outputDir} -c ./models/coco.names -x ${suffix}`;
+      
+      // Add NSGS flag if using optimized parallel approach
+      if (useOptimizedParallel) {
+        command += ' --nsgs';
+      }
     }
     
     console.log(`Executing command: ${command}`);
@@ -885,7 +943,7 @@ function processImageFile(req, res) {
               processedImageUrl: `/processed/${cppOutputName}`,
               originalImageName: originalName,
               processedImageName: cppOutputName,
-              fullUrl: `${req.protocol}://${req.get('host')}/processed/${cppOutputName}`,
+              fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
               processingTime: processingTime
             });
           }
@@ -932,7 +990,8 @@ function processImageFile(req, res) {
             width: width,
             height: height,
             suffix: suffix, // Indicates model type (m for detection, ms for segmentation)
-            isFallback: useDetectionFallback
+            isFallback: useDetectionFallback,
+            usedOptimizedParallel: useOptimizedParallel
           }));
           console.log(`Saved enhanced metadata to: ${metadataPath}`);
         } catch (metaError) {
@@ -951,7 +1010,8 @@ function processImageFile(req, res) {
           originalImageName: originalName,
           processedImageName: expectedProcessedName,
           fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
-          processingTime: processingTime
+          processingTime: processingTime,
+          usedOptimizedParallel: useOptimizedParallel
         });
       }
       
@@ -1021,6 +1081,7 @@ function processImageFile(req, res) {
         const processingTime = Math.round((endTime - startTime) / 1000);
         console.log(`Total processing time: ${processingTime} seconds`);
         
+        // Return the URL to the processed image
         return res.json({
           success: true,
           warning: 'The segmentation model did not produce output. Using simulated result.',
