@@ -11,11 +11,11 @@ import {
   Alert,
   Modal,
   FlatList,
+  Animated as RNAnimated
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera, Upload, Image as ImageIcon, Wifi, Bug, BrainCircuit, Scan, Layers, Zap, Network, ChevronDown, LayoutGrid, CopyCheck } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import Animated, {
   FadeIn,
@@ -27,8 +27,6 @@ import { processImage, testApiConnection, debugUploadImage, getApiUrl } from '@/
 import { ProcessedImageResult, DebugUploadResult } from '@/api/types';
 import { triggerHaptic, triggerHapticNotification } from '@/utils/haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
 const BORDER_RADIUS = 12; // Standardized border radius
 const CARD_SHADOW = {
@@ -94,11 +92,46 @@ export default function DetectScreen() {
   const [result, setResult] = useState<ProcessedImageResult | null>(null); // Store the API response
   const { theme, isDarkMode } = useTheme();
   
+  // New state for tracking image processing progress
+  const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 });
+  
   // Dropdown states
   const [modelDropdownVisible, setModelDropdownVisible] = useState(false);
   const [imageModeDropdownVisible, setImageModeDropdownVisible] = useState(false);
   const [selectedImageMode, setSelectedImageMode] = useState(imageModeOptions[0]);
-  const [selectedModelOption, setSelectedModelOption] = useState(modelOptions[1]); // Default to segmentation
+  const [selectedModelOption, setSelectedModelOption] = useState(modelOptions[1]); // Default to segmentation without NSGS
+  
+  // Track if user has made explicit selections
+  const [hasSelectedModel, setHasSelectedModel] = useState(false);
+  const [hasSelectedImageMode, setHasSelectedImageMode] = useState(false);
+
+  // New state for absolute position of dropdowns
+  const [modelDropdownPosition, setModelDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
+  const [imageModeDropdownPosition, setImageModeDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
+  
+  // Refs for measuring button positions
+  const modelButtonRef = useRef<View>(null);
+  const imageModeButtonRef = useRef<View>(null);
+
+  // New state variables for NSGS visualization
+  const [nsgsProcessingStats, setNsgsProcessingStats] = useState({
+    graphNodes: 0,
+    processedSpikes: 0,
+    queueSize: 0,
+    adaptationMultiplier: 1,
+    processingTime: 0,
+    status: '', // For status messages like "Creating graph nodes", "Processing spikes", etc.
+  });
+  
+  // Animation values for the progress indicators
+  const graphNodesProgress = useRef(new RNAnimated.Value(0)).current;
+  const spikesProgress = useRef(new RNAnimated.Value(0)).current;
+  const queueProgress = useRef(new RNAnimated.Value(0)).current;
+  const adaptationProgress = useRef(new RNAnimated.Value(0)).current;
+
+  // Add state for triangle animation
+  const [loadingDots, setLoadingDots] = useState<{x: number, y: number, opacity: number, fillPercent: number}[]>([]);
+  const triangleAnimationRef = useRef<NodeJS.Timeout | null>(null);
 
   // Load NSGS setting from AsyncStorage
   useEffect(() => {
@@ -173,11 +206,20 @@ export default function DetectScreen() {
     }
   }, []);
 
-  // Function to trigger haptic feedback on model selection
+  // Function to handle model option selection from dropdown
+  const handleModelOptionSelect = (option: ModelOption) => {
+    setSelectedModelOption(option);
+    handleModelSelect(option.value, option.useNSGS);
+    setModelDropdownVisible(false);
+    setHasSelectedModel(true); // Mark that user has made a selection
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  // Function to handle model selection
   const handleModelSelect = useCallback((model: string, useNSGSFlag?: boolean) => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
     setSelectedModel(model);
-    // If useNSGSFlag is explicitly provided, set it
+    // Only set NSGS if explicitly provided
     if (typeof useNSGSFlag === 'boolean') {
       setUseNSGS(useNSGSFlag);
       
@@ -185,17 +227,6 @@ export default function DetectScreen() {
       try {
         AsyncStorage.setItem('useNSGS', JSON.stringify(useNSGSFlag));
         console.log(`Saved NSGS preference to AsyncStorage: ${useNSGSFlag}`);
-      } catch (e) {
-        console.error('Failed to save NSGS preference:', e);
-      }
-    } else {
-      // Default to false for other models
-      setUseNSGS(false);
-      
-      // Save NSGS preference to AsyncStorage when turning it off
-      try {
-        AsyncStorage.setItem('useNSGS', JSON.stringify(false));
-        console.log('Saved NSGS preference to AsyncStorage: false');
       } catch (e) {
         console.error('Failed to save NSGS preference:', e);
       }
@@ -269,18 +300,11 @@ export default function DetectScreen() {
     }
   }, []);
 
-  // Function to handle model option selection from dropdown
-  const handleModelOptionSelect = (option: ModelOption) => {
-    setSelectedModelOption(option);
-    handleModelSelect(option.value, option.useNSGS);
-    setModelDropdownVisible(false);
-    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
-  };
-
   // Function to handle image mode selection from dropdown
   const handleImageModeSelect = (option: ImageModeOption) => {
     setSelectedImageMode(option);
     setImageModeDropdownVisible(false);
+    setHasSelectedImageMode(true); // Mark that user has made a selection
     triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
     
     // Reset images if switching modes
@@ -414,6 +438,224 @@ export default function DetectScreen() {
     }
   }, [selectedImageMode]);
 
+  // Function to reset and start triangle animation
+  const startTriangleAnimation = useCallback(() => {
+    // Clear any existing animation
+    if (triangleAnimationRef.current) {
+      clearInterval(triangleAnimationRef.current);
+    }
+    
+    // Initial empty state
+    setLoadingDots([]);
+    
+    // Create D-shaped triangle dots array - tall left side, single dot at right
+    const rows = 16; // More rows for taller left side
+    const dots: {x: number, y: number, opacity: number, fillPercent: number}[] = [];
+    
+    // Function to generate D-shaped triangle pattern
+    const generateDShapedTriangle = () => {
+      const triangleDots: {x: number, y: number, opacity: number, fillPercent: number}[] = [];
+      
+      for (let row = 0; row < rows; row++) {
+        // Calculate dots for this row to form a right triangle (D shape)
+        // Top row has the most dots, bottom row has just one dot
+        // This forms a diagonal line from top-right to bottom-left
+        const dotsInThisRow = Math.ceil((rows - row) / 2);
+        
+        for (let col = 0; col < dotsInThisRow; col++) {
+          triangleDots.push({
+            x: col,
+            y: row,
+            opacity: 1, // Dots are always visible
+            fillPercent: 0 // Start with 0% fill
+          });
+        }
+      }
+      return triangleDots;
+    };
+    
+    const allDots = generateDShapedTriangle();
+    setLoadingDots(allDots);
+    
+    // Animation timing variables
+    let currentDot = 0;
+    const totalDots = allDots.length;
+    
+    // Start animation interval - even slower (200ms)
+    triangleAnimationRef.current = setInterval(() => {
+      if (currentDot < totalDots) {
+        setLoadingDots(prev => {
+          const newDots = [...prev];
+          // Increment the fill percentage of the current dot
+          newDots[currentDot] = {...newDots[currentDot], fillPercent: 1};
+          return newDots;
+        });
+        currentDot++;
+      } else {
+        // Reset the animation to create a continuous effect
+        currentDot = 0;
+        
+        // Start filling again from the beginning with a longer delay
+        setTimeout(() => {
+          setLoadingDots(prev => prev.map(dot => ({...dot, fillPercent: 0})));
+        }, 1200);
+      }
+    }, 200); // Slower animation
+    
+    return () => {
+      if (triangleAnimationRef.current) {
+        clearInterval(triangleAnimationRef.current);
+      }
+    };
+  }, []);
+
+  // Update the simulation function to use triangle animation instead
+  useEffect(() => {
+    if (processing && useNSGS) {
+      // Reset progress values
+      graphNodesProgress.setValue(0);
+      spikesProgress.setValue(0);
+      queueProgress.setValue(0);
+      adaptationProgress.setValue(0);
+      
+      // Initial state
+      setNsgsProcessingStats({
+        graphNodes: 0,
+        processedSpikes: 0,
+        queueSize: 0,
+        adaptationMultiplier: 1,
+        processingTime: 0,
+        status: 'Initializing NSGS...',
+      });
+      
+      // Start triangle animation
+      startTriangleAnimation();
+    } else {
+      // Clear animation when not processing
+      if (triangleAnimationRef.current) {
+        clearInterval(triangleAnimationRef.current);
+      }
+    }
+  }, [processing, useNSGS, startTriangleAnimation]);
+
+  // Add rendered metrics to show below the result
+  const renderNsgsMetrics = useCallback(() => {
+    if (!processedImage || !useNSGS) return null;
+    
+    // Get current theme values directly from context to avoid reference errors
+    const { theme: currentTheme, isDarkMode: currentIsDarkMode } = useTheme();
+    
+    return (
+      <View style={[styles.nsgsMetricsContainer, {
+        backgroundColor: currentTheme.card,
+        ...(currentIsDarkMode ? {} : CARD_SHADOW)
+      }]}>
+        <Text style={[styles.nsgsMetricsTitle, { color: currentTheme.text }]}>NSGS Processing Metrics</Text>
+        
+        <View style={styles.nsgsMetricsRow}>
+          <View style={[styles.nsgsMetricBlock, {
+            backgroundColor: currentIsDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
+          }]}>
+            <Text style={[styles.nsgsMetricLabel, { color: currentTheme.textSecondary }]}>Graph Nodes</Text>
+            <Text style={[styles.nsgsMetricValue, { color: currentTheme.text }]}>
+              {nsgsProcessingStats.graphNodes.toLocaleString()}
+            </Text>
+          </View>
+          
+          <View style={[styles.nsgsMetricBlock, {
+            backgroundColor: currentIsDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
+          }]}>
+            <Text style={[styles.nsgsMetricLabel, { color: currentTheme.textSecondary }]}>Processed Spikes</Text>
+            <Text style={[styles.nsgsMetricValue, { color: currentTheme.text }]}>
+              {nsgsProcessingStats.processedSpikes.toLocaleString()}
+            </Text>
+          </View>
+        </View>
+        
+        <View style={styles.nsgsMetricsRow}>
+          <View style={[styles.nsgsMetricBlock, {
+            backgroundColor: currentIsDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
+          }]}>
+            <Text style={[styles.nsgsMetricLabel, { color: currentTheme.textSecondary }]}>Queue Size</Text>
+            <Text style={[styles.nsgsMetricValue, { color: currentTheme.text }]}>
+              {nsgsProcessingStats.queueSize.toLocaleString()}
+            </Text>
+          </View>
+          
+          <View style={[styles.nsgsMetricBlock, {
+            backgroundColor: currentIsDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
+          }]}>
+            <Text style={[styles.nsgsMetricLabel, { color: currentTheme.textSecondary }]}>Adaptation</Text>
+            <Text style={[styles.nsgsMetricValue, { color: currentTheme.text }]}>
+              {nsgsProcessingStats.adaptationMultiplier.toFixed(5)}x
+            </Text>
+          </View>
+        </View>
+        
+        <View style={[styles.nsgsMetricsTimeContainer, {
+          backgroundColor: currentIsDarkMode ? 'rgba(100, 53, 217, 0.1)' : 'rgba(106, 53, 217, 0.08)'
+        }]}>
+          <Text style={[styles.nsgsMetricsTimeLabel, { color: currentTheme.textSecondary }]}>Processing Time</Text>
+          <Text style={styles.nsgsMetricsTimeValue}>
+            {nsgsProcessingStats.processingTime.toFixed(2)}s
+          </Text>
+        </View>
+      </View>
+    );
+  }, [processedImage, useNSGS, nsgsProcessingStats]);
+
+  // Render the triangle loading animation
+  const renderTriangleLoading = () => {
+    if (!processing || !useNSGS) return null;
+    
+    const dotSize = 12;  // Even larger dots
+    const spacing = 20;  // More spacing
+    
+    return (
+      <View style={styles.triangleLoadingContainer}>
+        <Text style={styles.triangleLoadingTitle}>NSGS Neural Processing</Text>
+        
+        <Text style={styles.triangleLoadingStatus}>{nsgsProcessingStats.status || "Processing..."}</Text>
+        
+        <View style={styles.triangleWrapper}>
+          {loadingDots.map((dot, index) => (
+            <View
+              key={index}
+              style={{
+                position: 'absolute',
+                left: dot.x * spacing,
+                top: dot.y * spacing,
+                width: dotSize,
+                height: dotSize,
+                borderRadius: dotSize / 2,
+                borderWidth: 2,
+                borderColor: '#9A6AFF',
+                justifyContent: 'center',
+                alignItems: 'center',
+                overflow: 'hidden',
+              }}
+            >
+              {/* Inner filled circle that grows based on fillPercent */}
+              <RNAnimated.View
+                style={{
+                  width: dot.fillPercent * (dotSize - 5),
+                  height: dot.fillPercent * (dotSize - 5),
+                  borderRadius: (dotSize - 5) / 2,
+                  backgroundColor: '#6A35D9',
+                  opacity: 0.9,
+                }}
+              />
+            </View>
+          ))}
+        </View>
+        
+        {processingTimer > 0 && (
+          <Text style={styles.triangleLoadingTimer}>{processingTimer}s</Text>
+        )}
+      </View>
+    );
+  };
+
   // Function to process the selected image
   const handleProcessImage = useCallback(async () => {
     if (!selectedImage && selectedImages.length === 0) {
@@ -426,11 +668,21 @@ export default function DetectScreen() {
     setProcessedImage(null); // Clear any previous processed image
     setProcessingTime(null); // Reset processing time
     
+    // Reset NSGS stats
+    setNsgsProcessingStats({
+      graphNodes: 0,
+      processedSpikes: 0,
+      queueSize: 0,
+      adaptationMultiplier: 1,
+      processingTime: 0,
+      status: 'Initializing NSGS...',
+    });
+    
     const startTime = Date.now();
     
     try {
       // Log the image info before processing
-      console.log(`Processing image: ${selectedImage || selectedImages.join(', ')} with model: ${selectedModel}`);
+      console.log(`Processing ${selectedImages.length} images with model: ${selectedModel}`);
       
       // Log the API URL being used
       const apiUrl = getApiUrl();
@@ -439,7 +691,19 @@ export default function DetectScreen() {
       // Trigger success haptic when processing starts
       triggerHapticNotification(Haptics.NotificationFeedbackType.Success);
       
-      let result;
+      let finalResult: ProcessedImageResult | null = null;
+      const processedResults: ProcessedImageResult[] = [];
+      
+      // Create variables to accumulate NSGS stats across all processed images
+      let totalGraphNodes = 0;
+      let totalProcessedSpikes = 0;
+      let maxQueueSize = 0;
+      let finalAdaptationMultiplier = 1;
+      let nsgsProcessingTime = 0; // Renamed from totalProcessingTime to avoid duplicate
+      
+      // Generate a unique stackId for this batch of images if using stack mode
+      const isStackMode = selectedImageMode.value === 'stack' && selectedImages.length > 1;
+      const stackId = isStackMode ? `stack_${Date.now()}` : undefined;
       
       if (debugMode) {
         // Use debug upload mode (just uploads the file without processing)
@@ -454,7 +718,7 @@ export default function DetectScreen() {
             throw new Error(`Cannot connect to API at ${apiUrl}. Check that the server is running.`);
           }
           
-          result = await debugUploadImage(selectedImage || selectedImages[0]);
+          const result = await debugUploadImage(selectedImage || selectedImages[0]);
           console.log('Debug upload result:', result);
           
           Alert.alert('Debug Upload Success', 
@@ -483,11 +747,87 @@ export default function DetectScreen() {
         try {
           console.log(`Processing with model: ${selectedModel}`);
           console.log(`NSGS mode: ${useNSGS ? 'Enabled ✓' : 'Disabled ✗'}`);
-          result = await processImage(selectedImage || selectedImages[0], selectedModel, useNSGS);
-          console.log('Processing result:', result);
           
-          // Store the result in state
-          setResult(result);
+          // Process all images in the stack or just the single selected image
+          const imagesToProcess = selectedImageMode.value === 'stack' ? selectedImages : [selectedImage];
+          
+          // Set total images to process for progress tracking
+          setProcessingProgress({ current: 0, total: imagesToProcess.length });
+          
+          for (let i = 0; i < imagesToProcess.length; i++) {
+            const currentImage = imagesToProcess[i];
+            if (!currentImage) continue;
+            
+            // Update processing progress
+            setProcessingProgress({ current: i + 1, total: imagesToProcess.length });
+            
+            try {
+              const result = await processImage(currentImage, selectedModel, useNSGS);
+              
+              // Update with real NSGS stats if available
+              if (useNSGS && result && (result as any).nsgsStats) {
+                const nsgsStats = (result as any).nsgsStats;
+                console.log('Received NSGS stats from backend:', nsgsStats);
+                
+                // Accumulate stats across all processed images
+                totalGraphNodes = Math.max(totalGraphNodes, nsgsStats.graphNodes || 6400);
+                totalProcessedSpikes += (nsgsStats.processedSpikes || 0);
+                maxQueueSize = Math.max(maxQueueSize, nsgsStats.queueSize || 0);
+                finalAdaptationMultiplier = nsgsStats.adaptationMultiplier || finalAdaptationMultiplier;
+                nsgsProcessingTime += (nsgsStats.processingTime || 0); // Use renamed variable
+                
+                // Update current stats for the progress display
+                setNsgsProcessingStats({
+                  graphNodes: totalGraphNodes,
+                  processedSpikes: totalProcessedSpikes,
+                  queueSize: maxQueueSize,
+                  adaptationMultiplier: finalAdaptationMultiplier,
+                  processingTime: nsgsProcessingTime, // Use renamed variable
+                  status: nsgsStats.status || 'Processing complete'
+                });
+              }
+              
+              // Add stack information if this is a stack of images
+              if (isStackMode) {
+                (result as ProcessedImageResult).stackId = stackId;
+                (result as ProcessedImageResult).isStackImage = true;
+              }
+              
+              processedResults.push(result);
+              console.log(`Processed image ${i + 1}/${imagesToProcess.length}:`, result);
+            } catch (imageError) {
+              console.error(`Error processing image ${i + 1}:`, imageError);
+              // Continue with next image
+            }
+          }
+          
+          // After all images are processed, set the final accumulated NSGS stats
+          if (useNSGS) {
+            setNsgsProcessingStats({
+              graphNodes: totalGraphNodes,
+              processedSpikes: totalProcessedSpikes,
+              queueSize: maxQueueSize,
+              adaptationMultiplier: finalAdaptationMultiplier,
+              processingTime: nsgsProcessingTime, // Use renamed variable
+              status: 'All processing complete'
+            });
+          }
+          
+          // Use the last result as the final one to display
+          finalResult = processedResults[processedResults.length - 1];
+          
+          // Calculate actual UI processing time
+          const endTime = Date.now();
+          const uiProcessingTime = Math.round((endTime - startTime) / 1000);
+          setProcessingTime(uiProcessingTime);
+          
+          // Store all results if needed
+          setResult(finalResult);
+          
+          // If processing multiple images, show a summary
+          if (processedResults.length > 1) {
+            Alert.alert('Processing Complete', `Successfully processed ${processedResults.length} images!`);
+          }
         } catch (processingError: any) {
           console.error('Image processing error:', processingError);
           throw new Error(`Processing failed: ${processingError.message}`);
@@ -497,17 +837,17 @@ export default function DetectScreen() {
         const timestamp = new Date().getTime();
         
         // Check for fullUrl in the response first
-        if (result && result.fullUrl) {
-          console.log(`Using full URL from server: ${result.fullUrl}`);
+        if (finalResult && finalResult.fullUrl) {
+          console.log(`Using full URL from server: ${finalResult.fullUrl}`);
           // Always add a cache-busting parameter
-          const cachebustedUrl = result.fullUrl.includes('?') 
-            ? `${result.fullUrl}&t=${timestamp}` 
-            : `${result.fullUrl}?t=${timestamp}`;
+          const cachebustedUrl = finalResult.fullUrl.includes('?') 
+            ? `${finalResult.fullUrl}&t=${timestamp}` 
+            : `${finalResult.fullUrl}?t=${timestamp}`;
           setProcessedImage(cachebustedUrl);
         }
         // If no fullUrl, use processedImageUrl with API URL
-        else if (result && result.processedImageUrl) {
-          const fullUrl = `${apiUrl}${result.processedImageUrl}`;
+        else if (finalResult && finalResult.processedImageUrl) {
+          const fullUrl = `${apiUrl}${finalResult.processedImageUrl}`;
           console.log(`Constructed URL from processedImageUrl: ${fullUrl}`);
           // Always add a cache-busting parameter
           const cachebustedUrl = fullUrl.includes('?') 
@@ -515,46 +855,31 @@ export default function DetectScreen() {
             : `${fullUrl}?t=${timestamp}`;
           setProcessedImage(cachebustedUrl);
         } else {
-          console.error('No image URL in response:', result);
+          console.error('No image URL in response:', finalResult);
           throw new Error('No processed image URL received from server');
         }
         
         // Show success message (or warning for fallback)
-        if (result.isFallback) {
+        if (finalResult && finalResult.isFallback) {
           Alert.alert(
             'Processing Warning', 
             'The segmentation model failed to process this image, so we\'re showing the original image. Try the object detection model instead.'
           );
-        } else if (result.warning && result.warning.includes('fallback detection')) {
+        } else if (finalResult && finalResult.warning && finalResult.warning.includes('fallback detection')) {
           Alert.alert(
             'Segmentation Notice', 
             'The segmentation model had issues, so we used object detection instead. The results are shown with bounding boxes rather than full segmentation masks.'
           );
-        } else if (result.warning) {
+        } else if (finalResult && finalResult.warning) {
           Alert.alert(
             'Processing Notice', 
-            `The image was processed with a warning: ${result.warning}`
+            `The image was processed with a warning: ${finalResult.warning}`
           );
-        } else if (result.message && result.message.includes('best match')) {
+        } else if (finalResult && finalResult.message && finalResult.message.includes('best match')) {
           Alert.alert(
             'Processing Success',
             'The image was processed successfully, but we had to use the best matching output file.'
           );
-        } else {
-          Alert.alert('Success', 'Image processed successfully!');
-        }
-      }
-      
-      // Additional code to calculate total processing time
-      const endTime = Date.now();
-      const totalProcessingTime = Math.round((endTime - startTime) / 1000);
-      setProcessingTime(totalProcessingTime);
-      
-      // Add processing time to the result for history
-      if (result) {
-        // Check if it's a ProcessedImageResult before setting processingTime
-        if ('processedImageUrl' in result) {
-          (result as ProcessedImageResult).processingTime = totalProcessingTime;
         }
       }
       
@@ -574,9 +899,16 @@ export default function DetectScreen() {
       // Trigger error haptic
       triggerHapticNotification(Haptics.NotificationFeedbackType.Error);
     } finally {
+      // Stop triangle animation
+      if (triangleAnimationRef.current) {
+        clearInterval(triangleAnimationRef.current);
+      }
+      
       setProcessing(false);
+      // Reset progress
+      setProcessingProgress({ current: 0, total: 0 });
     }
-  }, [selectedImage, selectedImages, selectedModel, debugMode, useNSGS]);
+  }, [selectedImage, selectedImages, selectedModel, debugMode, useNSGS, selectedImageMode, startTriangleAnimation]);
 
   // Toggle debug mode
   const toggleDebugMode = useCallback(() => {
@@ -584,257 +916,453 @@ export default function DetectScreen() {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
   }, [debugMode]);
 
+  // Function to show model dropdown with correct position
+  const showModelDropdown = () => {
+    if (modelButtonRef.current) {
+      modelButtonRef.current.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+        setModelDropdownPosition({
+          top: pageY + height + 5,
+          left: pageX,
+          width: width
+        });
+        setModelDropdownVisible(true);
+      });
+    }
+  };
+  
+  // Function to show image mode dropdown with correct position
+  const showImageModeDropdown = () => {
+    if (imageModeButtonRef.current) {
+      imageModeButtonRef.current.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+        setImageModeDropdownPosition({
+          top: pageY + height + 5,
+          left: pageX,
+          width: width
+        });
+        setImageModeDropdownVisible(true);
+      });
+    }
+  };
+
   // Render dropdown for model selection
-  const renderModelDropdown = (
-    visible: boolean, 
-    setVisible: React.Dispatch<React.SetStateAction<boolean>>, 
-    options: ModelOption[], 
-    selectedOption: ModelOption, 
-    onSelect: (option: ModelOption) => void
-  ) => {
-    const backgroundColor = selectedOption.color || theme.card;
+  const renderModelDropdown = () => {
+    const backgroundColor = hasSelectedModel && selectedModelOption.color ? selectedModelOption.color : theme.card;
     
     return (
       <>
         <TouchableOpacity
+          ref={modelButtonRef}
           style={[
             styles.dropdownButton,
             { backgroundColor: backgroundColor }
           ]}
-          onPress={() => setVisible(true)}
+          onPress={showModelDropdown}
         >
           <View style={styles.dropdownSelectedItem}>
-            {selectedOption.icon && (
-              <selectedOption.icon 
+            {selectedModelOption.icon && hasSelectedModel ? (
+              <selectedModelOption.icon 
                 size={20} 
-                color={selectedOption.color ? '#fff' : theme.text} 
+                color={hasSelectedModel && selectedModelOption.color ? '#fff' : theme.text} 
                 style={styles.dropdownIcon} 
               />
-            )}
+            ) : null}
             <Text style={[
               styles.dropdownSelectedText, 
-              { color: selectedOption.color ? '#fff' : theme.text }
+              { color: hasSelectedModel && selectedModelOption.color ? '#fff' : theme.text }
             ]}>
-              {selectedOption.label}
+              {hasSelectedModel ? selectedModelOption.label : "Select Model"}
             </Text>
           </View>
-          <ChevronDown size={16} color={selectedOption.color ? '#fff' : theme.text} />
+          <ChevronDown size={16} color={hasSelectedModel && selectedModelOption.color ? '#fff' : theme.text} />
         </TouchableOpacity>
-
-        <Modal
-          visible={visible}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setVisible(false)}
-        >
-          <TouchableOpacity
-            style={styles.dropdownOverlay}
-            activeOpacity={1}
-            onPress={() => setVisible(false)}
-          >
-            <Animated.View 
-              entering={FadeIn.duration(150)}
-              exiting={FadeOut.duration(100)}
-              style={styles.dropdownAnimationContainer}
-            >
-              <BlurView 
-                intensity={isDarkMode ? 15 : 40}
-                tint={isDarkMode ? "dark" : "light"}
-                style={styles.dropdownMenuBlur}
-              >
-                <View style={styles.dropdownHeader}>
-                  <Text style={[styles.dropdownTitle, { color: theme.text }]}>
-                    Select Model
-                  </Text>
-                </View>
-                
-                <View style={styles.dropdownDivider} />
-                
-                <FlatList
-                  data={options}
-                  keyExtractor={(item) => item.id}
-                  showsVerticalScrollIndicator={false}
-                  bounces={true}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={[
-                        styles.dropdownItem,
-                        selectedOption.id === item.id ? 
-                          (item.color ? { backgroundColor: `${item.color}20` } : { backgroundColor: 'rgba(0, 122, 255, 0.08)' }) : {}
-                      ]}
-                      onPress={() => onSelect(item)}
-                    >
-                      <View style={styles.dropdownItemContent}>
-                        <View style={[
-                          styles.dropdownItemIconContainer,
-                          { backgroundColor: selectedOption.id === item.id ? (item.color || 'rgba(0, 122, 255, 0.8)') : 'rgba(140, 140, 140, 0.08)' }
-                        ]}>
-                          {item.icon && (
-                            <item.icon 
-                              size={16} 
-                              color={selectedOption.id === item.id ? '#fff' : theme.text} 
-                              strokeWidth={2}
-                            />
-                          )}
-                        </View>
-                        <Text style={[
-                          styles.dropdownItemText,
-                          { 
-                            color: theme.text,
-                            fontWeight: selectedOption.id === item.id ? '500' : '400'
-                          }
-                        ]}>
-                          {item.label}
-                        </Text>
-                      </View>
-                      {selectedOption.id === item.id && (
-                        <CopyCheck size={16} color={item.color || 'rgba(0, 122, 255, 0.8)'} strokeWidth={2} />
-                      )}
-                    </TouchableOpacity>
-                  )}
-                  style={styles.dropdownList}
-                />
-                
-                <TouchableOpacity 
-                  style={styles.dropdownCancelButton}
-                  onPress={() => setVisible(false)}
-                >
-                  <Text style={styles.dropdownCancelText}>Cancel</Text>
-                </TouchableOpacity>
-              </BlurView>
-            </Animated.View>
-          </TouchableOpacity>
-        </Modal>
       </>
     );
   };
 
   // Render dropdown for image mode selection
-  const renderImageModeDropdown = (
-    visible: boolean, 
-    setVisible: React.Dispatch<React.SetStateAction<boolean>>, 
-    options: ImageModeOption[], 
-    selectedOption: ImageModeOption, 
-    onSelect: (option: ImageModeOption) => void
-  ) => {
+  const renderImageModeDropdown = () => {
     return (
       <>
         <TouchableOpacity
+          ref={imageModeButtonRef}
           style={[
             styles.dropdownButton,
             { backgroundColor: theme.card }
           ]}
-          onPress={() => setVisible(true)}
+          onPress={showImageModeDropdown}
         >
           <View style={styles.dropdownSelectedItem}>
-            {selectedOption.icon && (
-              <selectedOption.icon 
+            {selectedImageMode.icon && hasSelectedImageMode ? (
+              <selectedImageMode.icon 
                 size={20} 
                 color={theme.text} 
                 style={styles.dropdownIcon} 
               />
-            )}
+            ) : null}
             <Text style={[
               styles.dropdownSelectedText, 
               { color: theme.text }
             ]}>
-              {selectedOption.label}
+              {hasSelectedImageMode ? selectedImageMode.label : "Select Image Mode"}
             </Text>
           </View>
           <ChevronDown size={16} color={theme.text} />
         </TouchableOpacity>
+      </>
+    );
+  };
 
-        <Modal
-          visible={visible}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setVisible(false)}
+  // Render model dropdown list
+  const renderModelDropdownList = () => {
+    if (!modelDropdownVisible) return null;
+    
+    return (
+      <View
+        style={[
+          StyleSheet.absoluteFill,
+          styles.dropdownBackdrop
+        ]}
+      >
+        <TouchableOpacity
+          style={[
+            StyleSheet.absoluteFill,
+          ]}
+          activeOpacity={1}
+          onPress={() => setModelDropdownVisible(false)}
+        />
+        
+        <View 
+          style={[
+            styles.dropdownPopup,
+            {
+              position: 'absolute',
+              top: modelDropdownPosition.top,
+              left: modelDropdownPosition.left,
+              width: modelDropdownPosition.width,
+              backgroundColor: isDarkMode ? 'rgba(40, 40, 40, 0.98)' : 'rgba(255, 255, 255, 0.98)',
+              zIndex: 1001,
+            }
+          ]}
         >
-          <TouchableOpacity
-            style={styles.dropdownOverlay}
-            activeOpacity={1}
-            onPress={() => setVisible(false)}
-          >
-            <Animated.View 
-              entering={FadeIn.duration(150)}
-              exiting={FadeOut.duration(100)}
-              style={styles.dropdownAnimationContainer}
-            >
-              <BlurView 
-                intensity={isDarkMode ? 15 : 40}
-                tint={isDarkMode ? "dark" : "light"}
-                style={styles.dropdownMenuBlur}
+          <View style={styles.dropdownHeader}>
+            <Text style={[styles.dropdownTitle, { color: theme.text }]}>
+              Select Model
+            </Text>
+          </View>
+          
+          <View style={styles.dropdownDivider} />
+          
+          <ScrollView style={styles.dropdownScrollView}>
+            {modelOptions.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[
+                  styles.dropdownItem,
+                  selectedModelOption.id === item.id ? 
+                    (item.color ? { backgroundColor: `${item.color}20` } : { backgroundColor: 'rgba(0, 122, 255, 0.08)' }) : {}
+                ]}
+                onPress={() => {
+                  handleModelOptionSelect(item);
+                  setModelDropdownVisible(false);
+                }}
               >
-                <View style={styles.dropdownHeader}>
-                  <Text style={[styles.dropdownTitle, { color: theme.text }]}>
-                    Select Image Mode
+                <View style={styles.dropdownItemContent}>
+                  <View style={[
+                    styles.dropdownItemIconContainer,
+                    { backgroundColor: selectedModelOption.id === item.id ? (item.color || 'rgba(0, 122, 255, 0.8)') : 'rgba(140, 140, 140, 0.08)' }
+                  ]}>
+                    {item.icon && (
+                      <item.icon 
+                        size={16} 
+                        color={selectedModelOption.id === item.id ? '#fff' : theme.text} 
+                        strokeWidth={2}
+                      />
+                    )}
+                  </View>
+                  <Text style={[
+                    styles.dropdownItemText,
+                    { 
+                      color: theme.text,
+                      fontWeight: selectedModelOption.id === item.id ? '600' : '400'
+                    }
+                  ]}>
+                    {item.label}
                   </Text>
                 </View>
-                
-                <View style={styles.dropdownDivider} />
-                
-                <FlatList
-                  data={options}
-                  keyExtractor={(item) => item.id}
-                  bounces={true}
-                  showsVerticalScrollIndicator={false}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={[
-                        styles.dropdownItem,
-                        selectedOption.id === item.id ? 
-                          { backgroundColor: 'rgba(0, 122, 255, 0.08)' } : {}
-                      ]}
-                      onPress={() => onSelect(item)}
-                    >
-                      <View style={styles.dropdownItemContent}>
-                        <View style={[
-                          styles.dropdownItemIconContainer,
-                          { backgroundColor: selectedOption.id === item.id ? 'rgba(0, 122, 255, 0.8)' : 'rgba(140, 140, 140, 0.08)' }
-                        ]}>
-                          {item.icon && (
-                            <item.icon 
-                              size={16} 
-                              color={selectedOption.id === item.id ? '#fff' : theme.text} 
-                              strokeWidth={2}
-                            />
-                          )}
-                        </View>
-                        <Text style={[
-                          styles.dropdownItemText,
-                          { 
-                            color: theme.text,
-                            fontWeight: selectedOption.id === item.id ? '500' : '400'
-                          }
-                        ]}>
-                          {item.label}
-                        </Text>
-                      </View>
-                      {selectedOption.id === item.id && (
-                        <CopyCheck size={16} color="rgba(0, 122, 255, 0.8)" strokeWidth={2} />
-                      )}
-                    </TouchableOpacity>
-                  )}
-                  style={styles.dropdownList}
-                />
-                
-                <TouchableOpacity 
-                  style={styles.dropdownCancelButton}
-                  onPress={() => setVisible(false)}
-                >
-                  <Text style={styles.dropdownCancelText}>Cancel</Text>
-                </TouchableOpacity>
-              </BlurView>
-            </Animated.View>
+                {selectedModelOption.id === item.id && (
+                  <CopyCheck size={16} color={item.color || 'rgba(0, 122, 255, 0.8)'} strokeWidth={2} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          
+          <TouchableOpacity 
+            style={styles.dropdownCancelButton}
+            onPress={() => setModelDropdownVisible(false)}
+          >
+            <Text style={styles.dropdownCancelText}>Cancel</Text>
           </TouchableOpacity>
-        </Modal>
-      </>
+        </View>
+      </View>
+    );
+  };
+
+  // Render image mode dropdown list
+  const renderImageModeDropdownList = () => {
+    if (!imageModeDropdownVisible) return null;
+    
+    return (
+      <View
+        style={[
+          StyleSheet.absoluteFill,
+          styles.dropdownBackdrop
+        ]}
+      >
+        <TouchableOpacity
+          style={[
+            StyleSheet.absoluteFill,
+          ]}
+          activeOpacity={1}
+          onPress={() => setImageModeDropdownVisible(false)}
+        />
+        
+        <View 
+          style={[
+            styles.dropdownPopup,
+            {
+              position: 'absolute',
+              top: imageModeDropdownPosition.top,
+              left: imageModeDropdownPosition.left,
+              width: imageModeDropdownPosition.width,
+              backgroundColor: isDarkMode ? 'rgba(40, 40, 40, 0.98)' : 'rgba(255, 255, 255, 0.98)',
+              zIndex: 1001,
+            }
+          ]}
+        >
+          <View style={styles.dropdownHeader}>
+            <Text style={[styles.dropdownTitle, { color: theme.text }]}>
+              Select Image Mode
+            </Text>
+          </View>
+          
+          <View style={styles.dropdownDivider} />
+          
+          <ScrollView style={styles.dropdownScrollView}>
+            {imageModeOptions.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[
+                  styles.dropdownItem,
+                  selectedImageMode.id === item.id ? 
+                    { backgroundColor: 'rgba(0, 122, 255, 0.08)' } : {}
+                ]}
+                onPress={() => {
+                  handleImageModeSelect(item);
+                  setImageModeDropdownVisible(false);
+                }}
+              >
+                <View style={styles.dropdownItemContent}>
+                  <View style={[
+                    styles.dropdownItemIconContainer,
+                    { backgroundColor: selectedImageMode.id === item.id ? 'rgba(0, 122, 255, 0.8)' : 'rgba(140, 140, 140, 0.08)' }
+                  ]}>
+                    {item.icon && (
+                      <item.icon 
+                        size={16} 
+                        color={selectedImageMode.id === item.id ? '#fff' : theme.text} 
+                        strokeWidth={2}
+                      />
+                    )}
+                  </View>
+                  <Text style={[
+                    styles.dropdownItemText,
+                    { 
+                      color: theme.text,
+                      fontWeight: selectedImageMode.id === item.id ? '600' : '400'
+                    }
+                  ]}>
+                    {item.label}
+                  </Text>
+                </View>
+                {selectedImageMode.id === item.id && (
+                  <CopyCheck size={16} color="rgba(0, 122, 255, 0.8)" strokeWidth={2} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          
+          <TouchableOpacity 
+            style={styles.dropdownCancelButton}
+            onPress={() => setImageModeDropdownVisible(false)}
+          >
+            <Text style={styles.dropdownCancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+  // Custom NSGS processing visualization
+  const renderNsgsProcessingUI = () => {
+    if (!processing || !useNSGS) return null;
+    
+    const width = RNAnimated.multiply(graphNodesProgress, new RNAnimated.Value(100));
+    const spikesWidth = RNAnimated.multiply(spikesProgress, new RNAnimated.Value(100));
+    const queueWidth = RNAnimated.multiply(queueProgress, new RNAnimated.Value(100));
+    const adaptWidth = RNAnimated.multiply(adaptationProgress, new RNAnimated.Value(100));
+    
+    return (
+      <View style={styles.nsgsProcessingContainer}>
+        <Text style={styles.nsgsHeader}>NSGS Neural Processing</Text>
+        
+        <Text style={styles.nsgsStatusText}>{nsgsProcessingStats.status}</Text>
+        
+        {/* Graph Nodes Progress */}
+        <View style={styles.nsgsMetricContainer}>
+          <View style={styles.nsgsMetricHeader}>
+            <Text style={styles.nsgsMetricTitle}>Graph Nodes</Text>
+            <Text style={styles.nsgsMetricValue}>{nsgsProcessingStats.graphNodes.toLocaleString()}</Text>
+          </View>
+          <View style={styles.nsgsProgressBarContainer}>
+            <RNAnimated.View 
+              style={[
+                styles.nsgsProgressBar, 
+                { width: width.interpolate({
+                  inputRange: [0, 100],
+                  outputRange: ['0%', '100%']
+                }) 
+              }]}
+            />
+          </View>
+        </View>
+        
+        {/* Processed Spikes Progress */}
+        <View style={styles.nsgsMetricContainer}>
+          <View style={styles.nsgsMetricHeader}>
+            <Text style={styles.nsgsMetricTitle}>Processed Spikes</Text>
+            <Text style={styles.nsgsMetricValue}>
+              {nsgsProcessingStats.processedSpikes.toLocaleString()}
+            </Text>
+          </View>
+          <View style={styles.nsgsProgressBarContainer}>
+            <RNAnimated.View 
+              style={[
+                styles.nsgsProgressBar, 
+                { 
+                  width: spikesWidth.interpolate({
+                    inputRange: [0, 100],
+                    outputRange: ['0%', '100%']
+                  }),
+                  backgroundColor: '#6A35D9' 
+                }
+              ]}
+            />
+          </View>
+        </View>
+        
+        {/* Queue Size Progress */}
+        <View style={styles.nsgsMetricContainer}>
+          <View style={styles.nsgsMetricHeader}>
+            <Text style={styles.nsgsMetricTitle}>Queue Size</Text>
+            <Text style={styles.nsgsMetricValue}>
+              {nsgsProcessingStats.queueSize.toLocaleString()}
+            </Text>
+          </View>
+          <View style={styles.nsgsProgressBarContainer}>
+            <RNAnimated.View 
+              style={[
+                styles.nsgsProgressBar, 
+                { 
+                  width: queueWidth.interpolate({
+                    inputRange: [0, 100],
+                    outputRange: ['0%', '100%']
+                  }),
+                  backgroundColor: '#FF9500' 
+                }
+              ]}
+            />
+          </View>
+        </View>
+        
+        {/* System Adaptation Progress */}
+        <View style={styles.nsgsMetricContainer}>
+          <View style={styles.nsgsMetricHeader}>
+            <Text style={styles.nsgsMetricTitle}>Adaptation Multiplier</Text>
+            <Text style={styles.nsgsMetricValue}>
+              {nsgsProcessingStats.adaptationMultiplier.toFixed(5)}
+            </Text>
+          </View>
+          <View style={styles.nsgsProgressBarContainer}>
+            <RNAnimated.View 
+              style={[
+                styles.nsgsProgressBar, 
+                { 
+                  width: adaptWidth.interpolate({
+                    inputRange: [0, 100],
+                    outputRange: ['0%', '100%']
+                  }),
+                  backgroundColor: '#34C759' 
+                }
+              ]}
+            />
+          </View>
+        </View>
+        
+        {nsgsProcessingStats.processingTime > 0 && (
+          <Text style={styles.nsgsProcessingTime}>
+            Processing Time: {nsgsProcessingStats.processingTime.toFixed(2)}s
+          </Text>
+        )}
+      </View>
+    );
+  };
+
+  // Update the Process button to use triangle loading animation
+  const renderProcessButton = () => {
+    return (
+      <TouchableOpacity
+        style={getStandardCardStyle({
+          backgroundColor: theme.primary,
+          marginBottom: 24,
+          opacity: ((!selectedImage && selectedImages.length === 0) || processing) ? 0.7 : 1
+        })}
+        onPress={() => {
+          console.log('Process button clicked!');
+          handleProcessImage();
+        }}
+        disabled={(!selectedImage && selectedImages.length === 0) || processing}
+      >
+        {processing ? (
+          useNSGS ? (
+            renderTriangleLoading()
+          ) : (
+            <View style={styles.processingContainer}>
+              <ActivityIndicator color="#fff" />
+              <Text style={styles.timerText}>{processingTimer}s</Text>
+              {processingProgress.total > 1 && (
+                <Text style={styles.imageProgressText}>
+                  {processingProgress.current}/{processingProgress.total} images
+                </Text>
+              )}
+            </View>
+          )
+        ) : (
+          <Text style={styles.processButtonText}>
+            Process {selectedImageMode.value === 'stack' ? 'Images' : 'Image'}
+          </Text>
+        )}
+      </TouchableOpacity>
     );
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView 
+        contentContainerStyle={[
+          styles.container,
+          { paddingBottom: Platform.OS === 'ios' ? 100 : 80 } // Add extra padding at the bottom
+        ]}
+      >
         <Text style={[styles.title, { color: theme.text }]}>Object Detection</Text>
         
         {/* API Connection Status */}
@@ -913,24 +1441,12 @@ export default function DetectScreen() {
         <View style={styles.dropdownsContainer}>
           <View style={styles.dropdownSection}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Select Model:</Text>
-            {renderModelDropdown(
-              modelDropdownVisible,
-              setModelDropdownVisible,
-              modelOptions,
-              selectedModelOption,
-              handleModelOptionSelect
-            )}
+            {renderModelDropdown()}
           </View>
           
           <View style={styles.dropdownSection}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Image Mode:</Text>
-            {renderImageModeDropdown(
-              imageModeDropdownVisible,
-              setImageModeDropdownVisible,
-              imageModeOptions,
-              selectedImageMode,
-              handleImageModeSelect
-            )}
+            {renderImageModeDropdown()}
           </View>
         </View>
         
@@ -998,29 +1514,7 @@ export default function DetectScreen() {
         </View>
         
         {/* Process button */}
-        <TouchableOpacity
-          style={getStandardCardStyle({
-            backgroundColor: theme.primary,
-            marginBottom: 24,
-            opacity: ((!selectedImage && selectedImages.length === 0) || processing) ? 0.7 : 1
-          })}
-          onPress={() => {
-            console.log('Process button clicked!');
-            handleProcessImage();
-          }}
-          disabled={(!selectedImage && selectedImages.length === 0) || processing}
-        >
-          {processing ? (
-            <View style={styles.processingContainer}>
-              <ActivityIndicator color="#fff" />
-              <Text style={styles.timerText}>{processingTimer}s</Text>
-            </View>
-          ) : (
-            <Text style={styles.processButtonText}>
-              Process {selectedImageMode.value === 'stack' ? 'Images' : 'Image'}
-            </Text>
-          )}
-        </TouchableOpacity>
+        {renderProcessButton()}
         
         {/* Processed image result */}
         {processedImage && (
@@ -1056,9 +1550,16 @@ export default function DetectScreen() {
                 resizeMode="contain"
               />
             </View>
+            
+            {/* Show NSGS metrics below the result */}
+            {useNSGS && renderNsgsMetrics()}
           </View>
         )}
       </ScrollView>
+
+      {/* Render dropdown lists */}
+      {renderModelDropdownList()}
+      {renderImageModeDropdownList()}
     </SafeAreaView>
   );
 }
@@ -1117,28 +1618,47 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: 'hidden',
   },
-  dropdownMenuBlur: {
+  dropdownMenuContent: {
     width: '100%',
     height: '100%',
     borderRadius: 20,
     overflow: 'hidden',
     paddingBottom: 8,
   },
+  dropdownBackdrop: {
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 1000,
+  },
+  dropdownPopup: {
+    borderRadius: BORDER_RADIUS,
+    overflow: 'hidden',
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    maxHeight: 400,
+  },
   dropdownHeader: {
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 10,
+    paddingTop: 16,
+    paddingBottom: 12,
     alignItems: 'center',
   },
   dropdownTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '600',
     textAlign: 'center',
   },
   dropdownDivider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(140, 140, 140, 0.2)',
-    marginHorizontal: 20,
+    marginHorizontal: 10,
+  },
+  dropdownScrollView: {
+    maxHeight: 250,
+    paddingHorizontal: 6,
+    paddingTop: 6,
   },
   dropdownList: {
     width: '100%',
@@ -1150,18 +1670,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 12,
+    marginVertical: 3,
+    borderRadius: 10,
   },
   dropdownItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   dropdownItemIconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -1170,11 +1690,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   dropdownCancelButton: {
-    marginTop: 8,
-    paddingVertical: 16,
-    marginHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: 'rgba(60, 60, 67, 0.1)',
+    marginVertical: 10,
+    paddingVertical: 14,
+    marginHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(60, 60, 67, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1245,6 +1765,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginLeft: 10,
     fontWeight: '600',
+    fontSize: 15,
+  },
+  imageProgressText: {
+    color: '#fff',
+    marginLeft: 10,
+    fontWeight: '500',
     fontSize: 15,
   },
   resultContainer: {
@@ -1328,5 +1854,137 @@ const styles = StyleSheet.create({
   noImageText: {
     marginTop: 10,
     fontSize: 16,
+  },
+  // NSGS Processing styles
+  nsgsProcessingContainer: {
+    width: '100%',
+    padding: 12,
+  },
+  nsgsHeader: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  nsgsStatusText: {
+    fontSize: 14,
+    color: '#fff',
+    opacity: 0.8,
+    textAlign: 'center',
+    marginBottom: 16,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  nsgsMetricContainer: {
+    marginBottom: 12,
+  },
+  nsgsMetricHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  nsgsMetricTitle: {
+    fontSize: 14,
+    color: '#fff',
+    opacity: 0.9,
+    fontWeight: '500',
+  },
+  nsgsMetricValue: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  nsgsProgressBarContainer: {
+    height: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  nsgsProgressBar: {
+    height: '100%',
+    backgroundColor: '#4A90E2',
+  },
+  nsgsProcessingTime: {
+    fontSize: 15,
+    color: '#fff',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 16,
+  },
+  triangleLoadingContainer: {
+    width: '100%',
+    padding: 12,
+    alignItems: 'center',
+  },
+  triangleLoadingTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  triangleLoadingStatus: {
+    fontSize: 14,
+    color: '#fff',
+    opacity: 0.8,
+    textAlign: 'center',
+    marginBottom: 16,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  triangleWrapper: {
+    width: 280,
+    height: 320, // Taller container for the D-shape
+    position: 'relative',
+    marginBottom: 16,
+  },
+  triangleLoadingTimer: {
+    fontSize: 15,
+    color: '#fff',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  nsgsMetricsContainer: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: BORDER_RADIUS,
+  },
+  nsgsMetricsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  nsgsMetricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  nsgsMetricBlock: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 8,
+    marginHorizontal: 4,
+  },
+  nsgsMetricLabel: {
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  nsgsMetricsTimeContainer: {
+    alignItems: 'center',
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 8,
+  },
+  nsgsMetricsTimeLabel: {
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  nsgsMetricsTimeValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#6A35D9',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
 });

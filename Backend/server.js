@@ -302,6 +302,24 @@ app.post('/process', logBodyMiddleware, handleDirectImageUpload, (req, res) => {
   const requestedModelType = req.body.modelType || 'yolov8m-seg';
   console.log(`Requested model type: ${requestedModelType}`);
   
+  // Create a unique subdirectory for this request
+  const requestId = Date.now().toString();
+  const requestInputDir = path.join(inputDir, requestId);
+  const requestOutputDir = path.join(outputDir, requestId);
+  
+  try {
+    // Create directories if they don't exist
+    if (!fs.existsSync(requestInputDir)) {
+      fs.mkdirSync(requestInputDir, { recursive: true });
+    }
+    if (!fs.existsSync(requestOutputDir)) {
+      fs.mkdirSync(requestOutputDir, { recursive: true });
+    }
+  } catch (dirError) {
+    console.error('Error creating request directories:', dirError);
+    return res.status(500).json({ error: 'Failed to create processing directories' });
+  }
+  
   // If multer already processed the file, use it
   if (req.file) {
     console.log('File successfully uploaded:', {
@@ -311,6 +329,18 @@ app.post('/process', logBodyMiddleware, handleDirectImageUpload, (req, res) => {
       size: req.file.size,
       path: req.file.path
     });
+    
+    // Move the file to the request-specific input directory
+    const newFilePath = path.join(requestInputDir, req.file.filename);
+    fs.renameSync(req.file.path, newFilePath);
+    req.file.path = newFilePath;
+    req.file.destination = requestInputDir;
+    
+    // Update the request object with the new directories
+    req.requestDirs = {
+      inputDir: requestInputDir,
+      outputDir: requestOutputDir
+    };
     
     processImageFile(req, res);
   } 
@@ -326,7 +356,7 @@ app.post('/process', logBodyMiddleware, handleDirectImageUpload, (req, res) => {
       
       // Create the file from base64 data
       const base64Data = req.body.imageBase64;
-      const filepath = path.join(inputDir, filename);
+      const filepath = path.join(requestInputDir, filename);
       
       // Check if base64Data exists before processing
       if (!base64Data) {
@@ -343,7 +373,7 @@ app.post('/process', logBodyMiddleware, handleDirectImageUpload, (req, res) => {
         originalname: filename,
         encoding: '7bit',
         mimetype: mimeType,
-        destination: inputDir,
+        destination: requestInputDir,
         filename: filename,
         path: filepath,
         size: fs.statSync(filepath).size
@@ -356,6 +386,12 @@ app.post('/process', logBodyMiddleware, handleDirectImageUpload, (req, res) => {
       } else {
         console.log(`Model type from request: ${req.body.modelType}`);
       }
+      
+      // Update the request object with the new directories
+      req.requestDirs = {
+        inputDir: requestInputDir,
+        outputDir: requestOutputDir
+      };
       
       // Process the image
       processImageFile(req, res);
@@ -372,7 +408,7 @@ app.post('/process', logBodyMiddleware, handleDirectImageUpload, (req, res) => {
       // Create a filename using timestamp
       const timestamp = Date.now();
       const filename = `${timestamp}-upload.jpg`;
-      const filepath = path.join(inputDir, filename);
+      const filepath = path.join(requestInputDir, filename);
       
       // For debugging, log what kind of data we received
       console.log('Image data type:', typeof req.body.image);
@@ -461,13 +497,19 @@ app.post('/process', logBodyMiddleware, handleDirectImageUpload, (req, res) => {
         originalname: filename,
         encoding: '7bit',
         mimetype: 'image/jpeg',
-        destination: inputDir,
+        destination: requestInputDir,
         filename: filename,
         path: filepath,
         size: fs.statSync(filepath).size
       };
       
       console.log('Created file from request body data:', req.file.path);
+      
+      // Update the request object with the new directories
+      req.requestDirs = {
+        inputDir: requestInputDir,
+        outputDir: requestOutputDir
+      };
       
       // Process the image file
       processImageFile(req, res);
@@ -490,6 +532,10 @@ function processImageFile(req, res) {
     
     let modelType = req.body.modelType || 'yolov8m-seg'; // Default to segmentation model if not specified
     console.log(`Using model type: ${modelType}`);
+    
+    // Get the request-specific directories
+    const requestInputDir = req.requestDirs?.inputDir || path.dirname(req.file.path);
+    const requestOutputDir = req.requestDirs?.outputDir || outputDir;
     
     // Check if using the optimized parallel approach (NSGS)
     let useOptimizedParallel;
@@ -605,7 +651,7 @@ function processImageFile(req, res) {
       const extension = originalName.lastIndexOf('.') !== -1 ? 
         originalName.substring(originalName.lastIndexOf('.')) : '.jpg';
       const processedName = `${baseName}_${suffix}${extension}`;
-      const processedPath = path.join(outputDir, processedName);
+      const processedPath = path.join(requestOutputDir, processedName);
       
       // Copy the input file to the output directory with the processed name
       fs.copyFileSync(inputFilePath, processedPath);
@@ -774,9 +820,9 @@ function processImageFile(req, res) {
     
     // Instead, ensure the output directory exists
     try {
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-        console.log(`Created output directory: ${outputDir}`);
+      if (!fs.existsSync(requestOutputDir)) {
+        fs.mkdirSync(requestOutputDir, { recursive: true });
+        console.log(`Created output directory: ${requestOutputDir}`);
       }
     } catch (dirError) {
       console.error(`Error ensuring output directory exists: ${dirError.message}`);
@@ -810,9 +856,7 @@ function processImageFile(req, res) {
       if (fs.existsSync(modelPath)) {
         // For segmentation model
         console.log('Running with segmentation model');
-        // Define inputDirPath from the file's directory
-        const inputDirPath = path.dirname(inputFilePath);
-        command = `./build/yolov8_ort -m ${modelPath} -i ${inputDirPath} -o ${outputDir} -c ./models/coco.names -x ${suffix}`;
+        command = `./build/yolov8_ort -m ${modelPath} -i ${requestInputDir} -o ${requestOutputDir} -c ./models/coco.names -x ${suffix}`;
         
         // Add NSGS flag if using optimized parallel approach
         if (useOptimizedParallel) {
@@ -824,9 +868,7 @@ function processImageFile(req, res) {
         console.log('Segmentation ONNX model not found. Trying detection model.');
         modelPath = './models/yolov8m.onnx';
         suffix = useOptimizedParallel ? 'nsgs-det' : 'm';
-        // Define inputDirPath from the file's directory
-        const inputDirPath = path.dirname(inputFilePath);
-        command = `./build/yolov8_ort -m ${modelPath} -i ${inputDirPath} -o ${outputDir} -c ./models/coco.names -x ${suffix}`;
+        command = `./build/yolov8_ort -m ${modelPath} -i ${requestInputDir} -o ${requestOutputDir} -c ./models/coco.names -x ${suffix}`;
         
         // Add NSGS flag if using optimized parallel approach
         if (useOptimizedParallel) {
@@ -837,9 +879,7 @@ function processImageFile(req, res) {
     } else {
       // For regular detection model
       console.log('Running with detection model');
-      // Define inputDirPath from the file's directory
-      const inputDirPath = path.dirname(inputFilePath);
-      command = `./build/yolov8_ort -m ${modelPath} -i ${inputDirPath} -o ${outputDir} -c ./models/coco.names -x ${suffix}`;
+      command = `./build/yolov8_ort -m ${modelPath} -i ${requestInputDir} -o ${requestOutputDir} -c ./models/coco.names -x ${suffix}`;
       
       // Add NSGS flag if using optimized parallel approach
       if (useOptimizedParallel) {
@@ -875,11 +915,11 @@ function processImageFile(req, res) {
         // Add timestamp for uniqueness
         const timestamp = Date.now();
         const processedName = `${baseName}_${suffix}_${timestamp}${extension}`;
-        const processedPath = path.join(outputDir, processedName);
+        const processedPath = path.join(requestOutputDir, processedName);
         
         // Create output directory if it doesn't exist
-        if (!fs.existsSync(outputDir)) {
-          fs.mkdirSync(outputDir, { recursive: true });
+        if (!fs.existsSync(requestOutputDir)) {
+          fs.mkdirSync(requestOutputDir, { recursive: true });
         }
         
         // Simply copy the input file to the output
@@ -891,7 +931,7 @@ function processImageFile(req, res) {
         
         // Save the processing time in the metadata file
         try {
-          const metadataPath = path.join(outputDir, `${processedName}.meta.json`);
+          const metadataPath = path.join(requestOutputDir, `${processedName}.meta.json`);
           fs.writeFileSync(metadataPath, JSON.stringify({
             originalName: originalName,
             processingTime: processingTime,
@@ -936,7 +976,7 @@ function processImageFile(req, res) {
       // Add a timestamp to ensure uniqueness
       const timestamp = Date.now();
       const expectedProcessedName = `${baseName}_${suffix}_${timestamp}${extension}`;
-      const expectedProcessedPath = path.join(outputDir, expectedProcessedName);
+      const expectedProcessedPath = path.join(requestOutputDir, expectedProcessedName);
       
       console.log(`Expected output filename: ${expectedProcessedName}`);
       console.log(`Expected output path: ${expectedProcessedPath}`);
@@ -945,7 +985,7 @@ function processImageFile(req, res) {
       // The C++ process will create a file with the pattern: baseName_suffix.extension
       // We need to rename it to include our timestamp
       const cppOutputName = `${baseName}_${suffix}${extension}`;
-      const cppOutputPath = path.join(outputDir, cppOutputName);
+      const cppOutputPath = path.join(requestOutputDir, cppOutputName);
       
       // If the C++ created the expected file, rename it to include our timestamp
       if (fs.existsSync(cppOutputPath)) {
@@ -984,7 +1024,7 @@ function processImageFile(req, res) {
         
         // Save the processing time in the metadata file
         try {
-          const metadataPath = path.join(outputDir, `${expectedProcessedName}.meta.json`);
+          const metadataPath = path.join(requestOutputDir, `${expectedProcessedName}.meta.json`);
           const fileStats = fs.statSync(expectedProcessedPath);
           const fileSize = fileStats.size;
           
@@ -1048,7 +1088,7 @@ function processImageFile(req, res) {
       
       try {
         // Get all files in the output directory
-        const outputFiles = fs.readdirSync(outputDir);
+        const outputFiles = fs.readdirSync(requestOutputDir);
         console.log(`Files in output directory: ${outputFiles.join(', ')}`);
         
         // If there are any files, use the first one
@@ -1095,7 +1135,7 @@ function processImageFile(req, res) {
         // Add timestamp for uniqueness
         const timestamp = Date.now();
         const processedName = `${expectedProcessedName.replace(suffix, suffix + '_simulated_' + timestamp)}`;
-        const processedPath = path.join(outputDir, processedName);
+        const processedPath = path.join(requestOutputDir, processedName);
         
         // Copy the input file to this unique path
         fs.copyFileSync(inputFilePath, processedPath);
@@ -1127,7 +1167,7 @@ function processImageFile(req, res) {
           // Add timestamp for uniqueness
           const timestamp = Date.now();
           const fallbackName = `${baseName}_${suffix}_fallback_${timestamp}${extension}`;
-          const fallbackPath = path.join(outputDir, fallbackName);
+          const fallbackPath = path.join(requestOutputDir, fallbackName);
           
           fs.copyFileSync(inputFilePath, fallbackPath);
           console.log(`Created fallback with unique name: ${fallbackPath}`);
@@ -1173,8 +1213,8 @@ function processImageFile(req, res) {
       }
     });
   } catch (error) {
-    console.error(`Server error in processImageFile: ${error.message}`);
-    res.status(500).json({ error: 'Server error', details: error.message });
+    console.error('Error in processImageFile:', error);
+    return res.status(500).json({ error: 'Failed to process image', details: error.message });
   }
 }
 

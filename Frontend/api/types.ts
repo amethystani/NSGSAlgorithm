@@ -15,6 +15,8 @@ export interface ProcessedImage {
   processedDate?: string;
   processedTime?: string;
   isFallback?: boolean;
+  stackId?: string;
+  isStackImage?: boolean;
 }
 
 /**
@@ -31,6 +33,16 @@ export interface ProcessedImageResult {
   isFallback?: boolean;
   processingTime?: number;
   usedNSGS?: boolean;
+  stackId?: string;
+  isStackImage?: boolean;
+  nsgsStats?: {
+    graphNodes: number;
+    processedSpikes: number;
+    queueSize: number;
+    adaptationMultiplier: number;
+    processingTime: number;
+    status: string;
+  };
 }
 
 /**
