@@ -10,6 +10,7 @@ import {
   Animated,
   Platform,
   SafeAreaView,
+  ActivityIndicator,
 } from 'react-native';
 import { ProcessedImage } from '@/api/types';
 import { X, ChevronLeft, ChevronRight, Download, Trash2 } from 'lucide-react-native';
@@ -84,17 +85,54 @@ const ImageAlbumView: React.FC<ImageAlbumViewProps> = ({
   };
   
   // Render individual image item
-  const renderItem = ({ item }: { item: ProcessedImage }) => (
-    <View style={styles.imageItemContainer}>
-      <PinchGestureView>
-        <Image
-          source={{ uri: item.url }}
-          style={styles.previewImage}
-          resizeMode="contain"
-        />
-      </PinchGestureView>
-    </View>
-  );
+  const renderItem = ({ item }: { item: ProcessedImage }) => {
+    const [isLoading, setIsLoading] = useState(true);
+    const [hasError, setHasError] = useState(false);
+    
+    return (
+      <View style={styles.imageItemContainer}>
+        <PinchGestureView>
+          {isLoading && (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#6A35D9" />
+              <Text style={styles.loadingText}>Loading image...</Text>
+            </View>
+          )}
+          
+          {hasError && (
+            <View style={styles.errorContainer}>
+              <X size={40} color="#F44336" />
+              <Text style={styles.errorText}>Failed to load image</Text>
+              <Text style={styles.errorUrl}>{item.url}</Text>
+            </View>
+          )}
+          
+          <Image
+            source={{ uri: item.url }}
+            style={[
+              styles.previewImage,
+              (isLoading || hasError) && { opacity: 0 }
+            ]}
+            resizeMode="contain"
+            defaultSource={require('../assets/images/icon.png')}
+            onLoadStart={() => {
+              setIsLoading(true);
+              setHasError(false);
+            }}
+            onLoad={() => {
+              console.log('Image loaded successfully:', item.url);
+              setIsLoading(false);
+            }}
+            onError={(e) => {
+              console.error('Error loading image:', e.nativeEvent.error, item.url);
+              setIsLoading(false);
+              setHasError(true);
+            }}
+          />
+        </PinchGestureView>
+      </View>
+    );
+  };
   
   // Extract image name from the first part before underscore
   const getImageName = (name: string) => {
@@ -282,6 +320,42 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   zoomHint: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  loadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 10,
+  },
+  errorContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 10,
+  },
+  errorUrl: {
     color: 'rgba(255,255,255,0.6)',
     fontSize: 14,
     marginTop: 8,

@@ -162,7 +162,28 @@ const handleDirectImageUpload = (req, res, next) => {
 };
 
 // Serve static files from the output directory
-app.use('/processed', express.static(path.join(__dirname, 'Imgoutput')));
+app.use('/processed', (req, res, next) => {
+  // Set appropriate content type based on file extension
+  const filePath = path.join(__dirname, 'Imgoutput', req.path);
+  const ext = path.extname(req.path).toLowerCase();
+  
+  console.log(`Serving file: ${filePath} with extension ${ext}`);
+  
+  if (ext === '.jpg' || ext === '.jpeg') {
+    res.set('Content-Type', 'image/jpeg');
+  } else if (ext === '.png') {
+    res.set('Content-Type', 'image/png');
+  } else if (ext === '.gif') {
+    res.set('Content-Type', 'image/gif');
+  }
+  
+  // Add CORS headers specifically for image files
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  
+  next();
+}, express.static(path.join(__dirname, 'Imgoutput')));
 
 // Add API endpoint for deleting processed images
 app.delete('/api/deleteImage/:filename', (req, res) => {
@@ -1069,6 +1090,16 @@ function processImageFile(req, res) {
         const processedImageUrl = `/processed/${expectedProcessedName}`;
         console.log(`Processed image URL: ${processedImageUrl}`);
         
+        // Read the image as base64 to include directly in the response
+        let imageBase64 = null;
+        try {
+          const imageBuffer = fs.readFileSync(expectedProcessedPath);
+          imageBase64 = `data:image/jpeg;base64,${imageBuffer.toString('base64')}`;
+          console.log('Added base64 image data to response');
+        } catch (base64Error) {
+          console.error(`Error reading image as base64: ${base64Error.message}`);
+        }
+        
         // Return the URL to the processed image
         return res.json({
           success: true,
@@ -1078,7 +1109,8 @@ function processImageFile(req, res) {
           processedImageName: expectedProcessedName,
           fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
           processingTime: processingTime,
-          usedNSGS: useOptimizedParallel
+          usedNSGS: useOptimizedParallel,
+          imageBase64: imageBase64 // Include base64 data for direct display
         });
       }
       

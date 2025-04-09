@@ -35,6 +35,9 @@ export interface ProcessedImageResult {
   usedNSGS?: boolean;
   stackId?: string;
   isStackImage?: boolean;
+  localUri?: string;
+  cachedImageUrl?: string;
+  imageBase64?: string;
   nsgsStats?: {
     graphNodes: number;
     processedSpikes: number;

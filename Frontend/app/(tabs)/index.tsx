@@ -27,6 +27,7 @@ import { processImage, testApiConnection, debugUploadImage, getApiUrl } from '@/
 import { ProcessedImageResult, DebugUploadResult } from '@/api/types';
 import { triggerHaptic, triggerHapticNotification } from '@/utils/haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
 
 const BORDER_RADIUS = 12; // Standardized border radius
 const CARD_SHADOW = {
@@ -90,6 +91,11 @@ export default function DetectScreen() {
   const [processingTime, setProcessingTime] = useState<number | null>(null);
   const [useNSGS, setUseNSGS] = useState(false); // Direct NSGS control
   const [result, setResult] = useState<ProcessedImageResult | null>(null); // Store the API response
+  
+  // New state for storing all processed images and slideshow controls
+  const [processedResults, setProcessedResults] = useState<ProcessedImageResult[]>([]); // Store all processed results
+  const [currentImageIndex, setCurrentImageIndex] = useState(0); // Current image index for slideshow
+  
   const { theme, isDarkMode } = useTheme();
   
   // New state for tracking image processing progress
@@ -813,7 +819,11 @@ export default function DetectScreen() {
             });
           }
           
-          // Use the last result as the final one to display
+          // Store all processed results for slideshow
+          setProcessedResults(processedResults);
+          setCurrentImageIndex(0);
+          
+          // Use the last result as the final one to display initially
           finalResult = processedResults[processedResults.length - 1];
           
           // Calculate actual UI processing time
@@ -823,6 +833,9 @@ export default function DetectScreen() {
           
           // Store all results if needed
           setResult(finalResult);
+          
+          // Show result container
+          setIsResultVisible(true);
           
           // If processing multiple images, show a summary
           if (processedResults.length > 1) {
@@ -836,13 +849,57 @@ export default function DetectScreen() {
         // Force refresh the image cache by adding a timestamp parameter
         const timestamp = new Date().getTime();
         
+        // First, prefer base64 image data from the response if available
+        if (finalResult && finalResult.imageBase64) {
+          console.log('Using base64 image data directly from server response');
+          setProcessedImage(finalResult.imageBase64);
+        }
+        // For mobile platforms, prefer local cached image if available
+        else if (finalResult && (finalResult.cachedImageUrl || finalResult.localUri)) {
+          const localUri = finalResult.cachedImageUrl || finalResult.localUri || '';
+          console.log(`Using locally cached image: ${localUri}`);
+          if (localUri) {
+            setProcessedImage(localUri);
+          } else {
+            console.warn('Local URI is empty, falling back to remote URL');
+          }
+        }
         // Check for fullUrl in the response first
-        if (finalResult && finalResult.fullUrl) {
+        else if (finalResult && finalResult.fullUrl) {
           console.log(`Using full URL from server: ${finalResult.fullUrl}`);
           // Always add a cache-busting parameter
           const cachebustedUrl = finalResult.fullUrl.includes('?') 
             ? `${finalResult.fullUrl}&t=${timestamp}` 
             : `${finalResult.fullUrl}?t=${timestamp}`;
+          
+          try {
+            // On mobile, try to download and display as base64 for more reliability
+            if (Platform.OS !== 'web') {
+              console.log('Attempting to convert remote image to base64 for display');
+              const tempDir = FileSystem.cacheDirectory;
+              const tempFile = `${tempDir}temp_${timestamp}.jpg`;
+              
+              // Download to temporary file
+              const downloadResult = await FileSystem.downloadAsync(cachebustedUrl, tempFile);
+              if (downloadResult.status === 200) {
+                // Read the file as base64
+                const base64 = await FileSystem.readAsStringAsync(tempFile, {
+                  encoding: FileSystem.EncodingType.Base64
+                });
+                
+                if (base64) {
+                  const dataUri = `data:image/jpeg;base64,${base64}`;
+                  console.log('Successfully converted image to base64');
+                  setProcessedImage(dataUri);
+                  return; // Stop here since we've set the image
+                }
+              }
+            }
+          } catch (e) {
+            console.error('Error converting image to base64:', e);
+          }
+          
+          // Fall back to the remote URL if base64 conversion fails
           setProcessedImage(cachebustedUrl);
         }
         // If no fullUrl, use processedImageUrl with API URL
@@ -853,6 +910,35 @@ export default function DetectScreen() {
           const cachebustedUrl = fullUrl.includes('?') 
             ? `${fullUrl}&t=${timestamp}` 
             : `${fullUrl}?t=${timestamp}`;
+          
+          try {
+            // On mobile, try to download and display as base64 for more reliability
+            if (Platform.OS !== 'web') {
+              console.log('Attempting to convert remote image to base64 for display');
+              const tempDir = FileSystem.cacheDirectory;
+              const tempFile = `${tempDir}temp_${timestamp}.jpg`;
+              
+              // Download to temporary file
+              const downloadResult = await FileSystem.downloadAsync(cachebustedUrl, tempFile);
+              if (downloadResult.status === 200) {
+                // Read the file as base64
+                const base64 = await FileSystem.readAsStringAsync(tempFile, {
+                  encoding: FileSystem.EncodingType.Base64
+                });
+                
+                if (base64) {
+                  const dataUri = `data:image/jpeg;base64,${base64}`;
+                  console.log('Successfully converted image to base64');
+                  setProcessedImage(dataUri);
+                  return; // Stop here since we've set the image
+                }
+              }
+            }
+          } catch (e) {
+            console.error('Error converting image to base64:', e);
+          }
+          
+          // Fall back to the remote URL if base64 conversion fails
           setProcessedImage(cachebustedUrl);
         } else {
           console.error('No image URL in response:', finalResult);
@@ -889,6 +975,9 @@ export default function DetectScreen() {
       console.error('Error processing image:', err);
       const errorMessage = err?.message || 'Failed to process image. Please try debug mode to troubleshoot.';
       setError(errorMessage);
+      
+      // Make sure the result view is shown
+      setIsResultVisible(true);
       
       // Show error dialog with more details
       Alert.alert(
@@ -1355,6 +1444,55 @@ export default function DetectScreen() {
     );
   };
 
+  // Function to navigate to the next image in the slideshow
+  const goToNextImage = useCallback(() => {
+    if (processedResults.length > 1 && currentImageIndex < processedResults.length - 1) {
+      const nextIndex = currentImageIndex + 1;
+      setCurrentImageIndex(nextIndex);
+      
+      // Update the displayed image
+      const nextResult = processedResults[nextIndex];
+      updateDisplayedImage(nextResult);
+      
+      // Provide haptic feedback
+      triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+    }
+  }, [processedResults, currentImageIndex]);
+
+  // Function to navigate to the previous image in the slideshow
+  const goToPrevImage = useCallback(() => {
+    if (processedResults.length > 1 && currentImageIndex > 0) {
+      const prevIndex = currentImageIndex - 1;
+      setCurrentImageIndex(prevIndex);
+      
+      // Update the displayed image
+      const prevResult = processedResults[prevIndex];
+      updateDisplayedImage(prevResult);
+      
+      // Provide haptic feedback
+      triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+    }
+  }, [processedResults, currentImageIndex]);
+
+  // Helper function to update the displayed image based on a result
+  const updateDisplayedImage = useCallback((result: ProcessedImageResult) => {
+    if (result) {
+      // Set the image based on the same priority as in handleProcessImage
+      if (result.imageBase64) {
+        setProcessedImage(result.imageBase64);
+      } else if (result.cachedImageUrl || result.localUri) {
+        setProcessedImage(result.cachedImageUrl || result.localUri || '');
+      } else if (result.fullUrl) {
+        setProcessedImage(result.fullUrl);
+      } else if (result.processedImageUrl) {
+        setProcessedImage(`${getApiUrl()}${result.processedImageUrl}`);
+      }
+      
+      // Update the current result for metadata display
+      setResult(result);
+    }
+  }, []);
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <ScrollView 
@@ -1516,44 +1654,112 @@ export default function DetectScreen() {
         {/* Process button */}
         {renderProcessButton()}
         
-        {/* Processed image result */}
-        {processedImage && (
-          <View style={[
-            styles.resultContainer, 
-            { 
-              borderRadius: BORDER_RADIUS,
-              ...(isDarkMode ? {} : CARD_SHADOW)
-            }
-          ]}>
-            <View style={styles.resultHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>Result:</Text>
-              {processingTime !== null && (
-                <Text style={[styles.processingTimeText, { color: theme.textSecondary }]}>
-                  Processed in {processingTime}s
-                  {result && result.usedNSGS && ' using NSGS'}
-                </Text>
-              )}
-            </View>
-            <View style={[
-              styles.processedImageWrapper,
-              { 
-                borderRadius: BORDER_RADIUS,
-                ...(isDarkMode ? {} : CARD_SHADOW)
-              }
-            ]}>
-              <Image 
-                source={{ uri: processedImage.startsWith('http') 
-                  ? processedImage 
-                  : `${getApiUrl()}${processedImage}` 
-                }} 
-                style={styles.processedImage} 
-                resizeMode="contain"
-              />
-            </View>
-            
-            {/* Show NSGS metrics below the result */}
-            {useNSGS && renderNsgsMetrics()}
-          </View>
+        {/* Results area (show processed image or error) */}
+        {isResultVisible && (
+          <Animated.View 
+            style={[
+              styles.resultsContainer,
+              { backgroundColor: isDarkMode ? theme.card : '#fff' }
+            ]}
+            entering={FadeIn.duration(500)}
+          >
+            {processing ? (
+              // Show processing UI based on model type
+              useNSGS ? renderTriangleLoading() : (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.primary} />
+                  <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+                    Processing image... {processingTimer > 0 ? `(${processingTimer}s)` : ''}
+                  </Text>
+                  
+                  {processingProgress.total > 1 && (
+                    <Text style={[styles.progressText, { color: theme.textSecondary }]}>
+                      Image {processingProgress.current}/{processingProgress.total}
+                    </Text>
+                  )}
+                </View>
+              )
+            ) : error ? (
+              <View style={styles.errorContainer}>
+                <Text style={[styles.errorText, { color: theme.error }]}>{error}</Text>
+                
+                <TouchableOpacity
+                  style={[styles.reconnectButton, { backgroundColor: theme.error }]}
+                  onPress={checkApiConnection}
+                >
+                  <Text style={styles.reconnectButtonText}>Test Connection</Text>
+                </TouchableOpacity>
+              </View>
+            ) : processedImage ? (
+              <View style={styles.resultImageContainer}>
+                {/* Image title when showing a stack slideshow */}
+                {processedResults.length > 1 && (
+                  <View style={styles.imageTitleContainer}>
+                    <Text style={styles.imageTitleText}>
+                      {result?.originalImageName || `Image ${currentImageIndex + 1}`}
+                    </Text>
+                  </View>
+                )}
+                
+                <Image
+                  source={{ uri: processedImage }}
+                  style={styles.resultImage}
+                  resizeMode="contain"
+                />
+                
+                {/* Slideshow Navigation - Show only when we have multiple images */}
+                {processedResults.length > 1 && (
+                  <View style={styles.slideshowControls}>
+                    {/* Previous button */}
+                    <TouchableOpacity 
+                      style={[
+                        styles.slideshowButton, 
+                        currentImageIndex === 0 && styles.slideshowButtonDisabled
+                      ]}
+                      onPress={goToPrevImage}
+                      disabled={currentImageIndex === 0}
+                    >
+                      <Text style={styles.slideshowButtonText}>◀</Text>
+                    </TouchableOpacity>
+                    
+                    {/* Image counter */}
+                    <View style={styles.slideshowCounter}>
+                      <Text style={styles.slideshowCounterText}>
+                        {currentImageIndex + 1} / {processedResults.length}
+                      </Text>
+                      
+                      {/* Dot indicators for slideshow */}
+                      <View style={styles.dotIndicatorContainer}>
+                        {processedResults.map((_, index) => (
+                          <View 
+                            key={index} 
+                            style={[
+                              styles.dotIndicator,
+                              index === currentImageIndex && styles.dotIndicatorActive
+                            ]} 
+                          />
+                        ))}
+                      </View>
+                    </View>
+                    
+                    {/* Next button */}
+                    <TouchableOpacity 
+                      style={[
+                        styles.slideshowButton,
+                        currentImageIndex === processedResults.length - 1 && styles.slideshowButtonDisabled
+                      ]}
+                      onPress={goToNextImage}
+                      disabled={currentImageIndex === processedResults.length - 1}
+                    >
+                      <Text style={styles.slideshowButtonText}>▶</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                
+                {useNSGS && renderNsgsMetrics()}
+              </View>
+            ) : null}
+          </Animated.View>
         )}
       </ScrollView>
 
@@ -1774,10 +1980,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   resultContainer: {
-    marginTop: 8,
+    marginTop: 16,
     marginBottom: 32,
-    padding: 16,
-    backgroundColor: 'rgba(0,0,0,0.02)',
+    padding: 0,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
   processedImageWrapper: {
     height: 350,
@@ -1986,5 +2193,160 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#6A35D9',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  resultsContainer: {
+    marginTop: 16,
+    marginBottom: 32,
+    padding: 0,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginLeft: 10,
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  progressText: {
+    marginLeft: 10,
+    fontWeight: '500',
+    fontSize: 15,
+  },
+  resultImageContainer: {
+    height: 400,
+    width: '100%',
+    overflow: 'hidden',
+    borderWidth: 0,
+    position: 'relative',
+    backgroundColor: 'rgba(0, 0, 0, 0.03)',
+    borderRadius: 12,
+  },
+  resultImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'transparent',
+  },
+  debugInfoContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 10,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  debugInfoContainerWithSlideshow: {
+    bottom: 70, // Move up to allow space for slideshow controls
+  },
+  debugInfoText: {
+    fontSize: 13,
+    color: '#fff',
+  },
+  reconnectButton: {
+    padding: 16,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reconnectButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  refreshButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 30,
+    height: 30,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  refreshButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  slideshowControls: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 25,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+  },
+  slideshowButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(106, 53, 217, 0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 10,
+  },
+  slideshowButtonDisabled: {
+    backgroundColor: 'rgba(128, 128, 128, 0.4)',
+  },
+  slideshowButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  slideshowCounter: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slideshowCounterText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dotIndicatorContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  dotIndicator: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginHorizontal: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  dotIndicatorActive: {
+    backgroundColor: '#fff',
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  imageTitleContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    padding: 12,
+    zIndex: 5,
+  },
+  imageTitleText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

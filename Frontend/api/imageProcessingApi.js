@@ -7,6 +7,7 @@ import { Platform } from 'react-native';
 export const getApiUrl = () => {
   // Use localhost for web and for local testing
   if (Platform.OS === 'web') {
+    console.log('Using web platform, API URL will be localhost');
     return 'http://localhost:3000';
   }
   
@@ -14,11 +15,13 @@ export const getApiUrl = () => {
   // This is the actual IP address of your machine on the network
   const DEVICE_IP = '10.79.107.65';
   
+  console.log(`Using mobile platform (${Platform.OS}), API URL will be http://${DEVICE_IP}:3000`);
   return `http://${DEVICE_IP}:3000`;
 };
 
 const API_URL = getApiUrl();
 console.log(`Using API URL: ${API_URL}`);
+console.log(`Platform: ${Platform.OS}, API URL: ${API_URL}`);
 
 // Helper function to create a fetch request with timeout
 const fetchWithTimeout = async (url, options = {}, timeout = 120000, retries = 3) => {
@@ -377,6 +380,89 @@ export const processImage = async (imageUri, modelType = 'yolov8m-seg', useNSGS 
           
           const result = await response.json();
           console.log('Processing result:', result);
+          
+          // For mobile platforms, download the image to local cache storage
+          if (Platform.OS !== 'web' && (result.processedImageUrl || result.fullUrl)) {
+            try {
+              // Get the full URL with the API base URL
+              const imgUrl = result.fullUrl || `${API_URL}${result.processedImageUrl}`;
+              
+              // Ensure the URL has correct protocol and host
+              const fullUrl = imgUrl.startsWith('http') 
+                ? imgUrl
+                : (imgUrl.startsWith('/') ? `${API_URL}${imgUrl}` : `${API_URL}/${imgUrl}`);
+              
+              console.log('Downloading processed image to local cache:', fullUrl);
+              
+              // Create cache directory if it doesn't exist
+              const cacheDir = `${FileSystem.cacheDirectory}processed-images/`;
+              const cacheDirInfo = await FileSystem.getInfoAsync(cacheDir);
+              if (!cacheDirInfo.exists) {
+                await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+                console.log('Created cache directory:', cacheDir);
+              }
+              
+              // Generate local filename with timestamp to avoid cache issues
+              const timestamp = Date.now();
+              const localFilename = `${timestamp}_${result.processedImageName || 'processed.jpg'}`;
+              const localUri = `${cacheDir}${localFilename}`;
+              
+              // Download the file with retry logic
+              console.log(`Downloading image from ${fullUrl} to ${localUri}`);
+              
+              // Try up to 3 times with increasing delays
+              let downloadSuccess = false;
+              let downloadError = null;
+              
+              for (let attempt = 0; attempt < 3 && !downloadSuccess; attempt++) {
+                try {
+                  if (attempt > 0) {
+                    console.log(`Retry attempt ${attempt + 1}/3...`);
+                    // Wait before retrying (exponential backoff)
+                    await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
+                  }
+                  
+                  const downloadResult = await FileSystem.downloadAsync(fullUrl, localUri);
+                  
+                  // Verify the download was successful
+                  if (downloadResult.status === 200) {
+                    console.log('Successfully downloaded image to local cache:', localUri);
+                    
+                    // Verify the file exists and has content
+                    const fileInfo = await FileSystem.getInfoAsync(localUri);
+                    if (fileInfo.exists && fileInfo.size > 0) {
+                      console.log(`Downloaded file size: ${fileInfo.size} bytes`);
+                      downloadSuccess = true;
+                      
+                      // Add the local URI to the result
+                      result.localUri = localUri;
+                      result.cachedImageUrl = `file://${localUri}`;
+                      
+                      console.log('Added local URI to result:', result.cachedImageUrl);
+                    } else {
+                      console.warn('Downloaded file is empty or does not exist.');
+                      downloadError = new Error('Downloaded file is empty or does not exist');
+                    }
+                  } else {
+                    console.warn(`Download returned status: ${downloadResult.status}`);
+                    downloadError = new Error(`Download failed with status: ${downloadResult.status}`);
+                  }
+                } catch (attemptError) {
+                  console.error(`Download attempt ${attempt + 1} failed:`, attemptError);
+                  downloadError = attemptError;
+                }
+              }
+              
+              if (!downloadSuccess && downloadError) {
+                console.error('All download attempts failed:', downloadError);
+                throw downloadError;
+              }
+            } catch (downloadError) {
+              console.error('Error downloading image to local cache:', downloadError);
+              // Continue even if download fails - we'll try to use the remote URL
+            }
+          }
+          
           return result;
         } catch (error) {
           console.error('Error processing image:', error);
