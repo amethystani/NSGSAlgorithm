@@ -4,6 +4,9 @@ const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
 const cors = require('cors');
+const datasetLogger = require('./datasetLogger');
+const nsgsDataLogger = require('./nsgsDataLogger');
+const yolov8DataLogger = require('./yolov8DataLogger');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -34,7 +37,10 @@ app.get('/', (req, res) => {
       '/': 'This help message',
       '/process': 'POST - Process an image using YOLOv8',
       '/history': 'GET - Get a list of processed images',
-      '/processed/:filename': 'GET - Access a processed image file'
+      '/processed/:filename': 'GET - Access a processed image file',
+      '/dataset': 'GET - Retrieve the processing dataset as CSV or JSON',
+      '/nsgs-dataset': 'GET - Retrieve NSGS algorithm metrics as CSV or JSON',
+      '/yolov8-dataset': 'GET - Retrieve YOLOv8 model metrics as CSV or JSON'
     }
   });
 });
@@ -1111,6 +1117,150 @@ function processImageFile(req, res) {
           processingTime: processingTime,
           usedNSGS: useOptimizedParallel,
           imageBase64: imageBase64 // Include base64 data for direct display
+        }).on('finish', async () => {
+          // Log the image processing data to CSV after response is sent
+          try {
+            const inputFileStats = fs.statSync(inputFilePath);
+            const outputFileStats = fs.statSync(expectedProcessedPath);
+            const metadataPath = path.join(requestOutputDir, `${expectedProcessedName}.meta.json`);
+            
+            // Parse command output to extract detected objects
+            let detectedObjects = [];
+            if (stdout) {
+              // Try to extract detected objects from the stdout
+              const classMatches = stdout.match(/class: (\d+)(, conf: [\d\.]+)/g);
+              if (classMatches) {
+                const classNames = fs.readFileSync(path.join(__dirname, 'models', 'coco.names'), 'utf8')
+                  .split('\n')
+                  .filter(Boolean);
+                
+                detectedObjects = classMatches.map(match => {
+                  const classId = parseInt(match.match(/class: (\d+)/)[1]);
+                  return classNames[classId] || `class_${classId}`;
+                });
+              }
+            }
+            
+            // Log to general dataset
+            await datasetLogger.logImageProcessing({
+              inputFileName: originalName,
+              inputFilePath: inputFilePath,
+              inputFileSize: inputFileStats.size,
+              outputFileName: expectedProcessedName,
+              outputFilePath: expectedProcessedPath,
+              outputFileSize: outputFileStats.size,
+              modelType: modelType,
+              nsgsEnabled: useOptimizedParallel,
+              processingTimeMs: processingTime * 1000, // Convert seconds to milliseconds
+              detectedObjects: detectedObjects,
+              processedImageUrl: processedImageUrl,
+              metadataPath: metadataPath,
+              commandExecuted: command
+            });
+            
+            // Get image dimensions for more detailed logging
+            let imageWidth = 0;
+            let imageHeight = 0;
+            try {
+              const buffer = fs.readFileSync(inputFilePath);
+              // Simple detection of image dimensions for common formats
+              const isPNG = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47;
+              if (isPNG && buffer.length > 24) {
+                imageWidth = buffer.readUInt32BE(16);
+                imageHeight = buffer.readUInt32BE(20);
+              }
+              // NOTE: For JPEG we'd need more complex parsing
+            } catch (err) {
+              console.error(`Error detecting image dimensions: ${err.message}`);
+            }
+            
+            if (useOptimizedParallel) {
+              // Log to NSGS-specific dataset with more detailed metrics
+              const nsgsMetrics = nsgsDataLogger.estimateNsgsMetrics(
+                inputFileStats.size, 
+                processingTime * 1000, 
+                useOptimizedParallel
+              );
+              
+              await nsgsDataLogger.logNsgsMetrics({
+                imageId: `img_${Date.now()}`,
+                modelType: modelType,
+                imageSize: inputFileStats.size,
+                imageWidth: imageWidth,
+                imageHeight: imageHeight,
+                totalNodes: nsgsMetrics.totalNodes,
+                activeNodes: nsgsMetrics.activeNodes,
+                parallelPathways: nsgsMetrics.parallelPathways,
+                executionTime: processingTime * 1000, // ms
+                standardTime: nsgsMetrics.standardTime,
+                memoryUsage: nsgsMetrics.memoryUsage,
+                cpuUtilization: nsgsMetrics.cpuUtilization,
+                detectedObjects: detectedObjects,
+                parallelizationDepth: nsgsMetrics.parallelizationDepth,
+                graphDensity: nsgsMetrics.graphDensity,
+                averageNodeWeight: nsgsMetrics.averageNodeWeight,
+                maxNodeWeight: nsgsMetrics.maxNodeWeight,
+                algorithmicEfficiency: nsgsMetrics.algorithmicEfficiency,
+                threadUtilization: nsgsMetrics.threadUtilization,
+                preprocessTime: nsgsMetrics.preprocessTime, // Add preprocessing time
+                inferenceTime: nsgsMetrics.inferenceTime,   // Add inference time 
+                postprocessTime: nsgsMetrics.postprocessTime, // Add postprocessing time
+                ioOverhead: nsgsMetrics.ioOverhead,         // Add I/O overhead
+                commandOutput: stdout
+              });
+            } else {
+              // For standard YOLOv8 model (non-NSGS), log architecture-specific metrics
+              const yolov8Metrics = yolov8DataLogger.estimateYolov8Metrics(
+                inputFileStats.size,
+                processingTime * 1000,
+                modelType
+              );
+              
+              // Extract timing information for specific layers if available in stdout
+              let layerTimes = [];
+              if (stdout) {
+                const layerTimeMatches = stdout.match(/Layer \d+ time: ([\d\.]+) ms/g);
+                if (layerTimeMatches) {
+                  layerTimes = layerTimeMatches.map(match => {
+                    return parseFloat(match.replace(/Layer \d+ time: /, '').replace(' ms', ''));
+                  });
+                }
+              }
+              
+              // Calculate actual layer statistics if available
+              let avgLayerTime = 0;
+              let maxLayerTime = 0;
+              if (layerTimes.length > 0) {
+                avgLayerTime = layerTimes.reduce((sum, time) => sum + time, 0) / layerTimes.length;
+                maxLayerTime = Math.max(...layerTimes);
+              } else {
+                avgLayerTime = yolov8Metrics.averageLayerTime;
+                maxLayerTime = yolov8Metrics.maxLayerTime;
+              }
+              
+              await yolov8DataLogger.logYolov8Metrics({
+                imageId: `img_${Date.now()}`,
+                modelType: modelType,
+                imageSize: inputFileStats.size,
+                imageWidth: imageWidth,
+                imageHeight: imageHeight,
+                totalNodes: yolov8Metrics.totalNodes,
+                activeNodes: yolov8Metrics.activeNodes,
+                executionTime: processingTime * 1000, // ms
+                memoryUsage: yolov8Metrics.memoryUsage,
+                cpuUtilization: yolov8Metrics.cpuUtilization,
+                detectedObjects: detectedObjects,
+                inferenceFlops: yolov8Metrics.inferenceFlops,
+                layerDepth: yolov8Metrics.layerDepth,
+                averageLayerTime: avgLayerTime,
+                maxLayerTime: maxLayerTime,
+                threadUtilization: yolov8Metrics.threadUtilization,
+                commandOutput: stdout
+              });
+            }
+          } catch (logError) {
+            console.error(`Error logging to dataset: ${logError.message}`);
+          }
         });
       }
       
@@ -1356,6 +1506,282 @@ app.get('/history', (req, res) => {
     
     res.json({ images });
   });
+});
+
+// Add a new endpoint to get the dataset
+app.get('/dataset', async (req, res) => {
+  try {
+    const format = req.query.format?.toLowerCase() || 'json';
+    
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=image-processing-dataset.csv');
+      
+      // Stream the CSV file directly
+      const csvPath = path.join(__dirname, 'imageProcessingData.csv');
+      if (fs.existsSync(csvPath)) {
+        fs.createReadStream(csvPath).pipe(res);
+      } else {
+        res.status(404).json({ error: 'Dataset file not found' });
+      }
+    } else {
+      // Return JSON format
+      const dataset = await datasetLogger.getDataset();
+      res.json({
+        count: dataset.length,
+        data: dataset
+      });
+    }
+  } catch (error) {
+    console.error(`Error retrieving dataset: ${error.message}`);
+    res.status(500).json({ error: 'Failed to retrieve dataset', details: error.message });
+  }
+});
+
+// Add endpoint for NSGS-specific dataset
+app.get('/nsgs-dataset', async (req, res) => {
+  try {
+    const format = req.query.format?.toLowerCase() || 'json';
+    
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=nsgs-algorithm-data.csv');
+      
+      // Stream the CSV file from the datasets directory
+      const csvPath = path.join(__dirname, 'datasets', 'nsgsAlgorithmData.csv');
+      if (fs.existsSync(csvPath)) {
+        fs.createReadStream(csvPath).pipe(res);
+      } else {
+        res.status(404).json({ error: 'NSGS dataset file not found' });
+      }
+    } else {
+      // Return JSON format
+      const dataset = await nsgsDataLogger.getDataset();
+      
+      // Calculate summary statistics
+      let totalSpeedup = 0;
+      let maxSpeedup = 0;
+      let minSpeedup = Number.MAX_VALUE;
+      let totalNodes = 0;
+      let totalPaths = 0;
+      let totalSpikes = 0;
+      let totalSyncPoints = 0;
+      let totalBottleneckReduction = 0;
+      
+      // Timing metrics
+      let totalPreprocessTime = 0;
+      let totalInferenceTime = 0;
+      let totalPostprocessTime = 0;
+      let totalIOOverhead = 0;
+      
+      dataset.forEach(entry => {
+        const speedup = parseFloat(entry.speedupRatio) || 0;
+        if (speedup > 0) {
+          totalSpeedup += speedup;
+          maxSpeedup = Math.max(maxSpeedup, speedup);
+          minSpeedup = Math.min(minSpeedup, speedup);
+        }
+        
+        totalNodes += parseInt(entry.totalNodes) || 0;
+        totalPaths += parseInt(entry.parallelPathways) || 0;
+        totalSpikes += parseInt(entry.neuralSpikes) || 0;
+        totalSyncPoints += parseInt(entry.synchronizationPoints) || 0;
+        totalBottleneckReduction += parseFloat(entry.bottleneckReduction) || 0;
+        
+        // Accumulate timing metrics
+        totalPreprocessTime += parseFloat(entry.preprocessTime) || 0;
+        totalInferenceTime += parseFloat(entry.inferenceTime) || 0;
+        totalPostprocessTime += parseFloat(entry.postprocessTime) || 0;
+        totalIOOverhead += parseFloat(entry.ioOverhead) || 0;
+      });
+      
+      const avgSpeedup = dataset.length > 0 ? (totalSpeedup / dataset.length).toFixed(2) : 0;
+      const avgNodes = dataset.length > 0 ? Math.round(totalNodes / dataset.length) : 0;
+      const avgPaths = dataset.length > 0 ? Math.round(totalPaths / dataset.length) : 0;
+      const avgSpikes = dataset.length > 0 ? Math.round(totalSpikes / dataset.length) : 0;
+      const avgSyncPoints = dataset.length > 0 ? Math.round(totalSyncPoints / dataset.length) : 0;
+      const avgBottleneckReduction = dataset.length > 0 ? (totalBottleneckReduction / dataset.length).toFixed(2) : 0;
+      
+      // Calculate average timing metrics
+      const avgPreprocessTime = dataset.length > 0 ? (totalPreprocessTime / dataset.length).toFixed(2) : 0;
+      const avgInferenceTime = dataset.length > 0 ? (totalInferenceTime / dataset.length).toFixed(2) : 0;
+      const avgPostprocessTime = dataset.length > 0 ? (totalPostprocessTime / dataset.length).toFixed(2) : 0;
+      const avgIOOverhead = dataset.length > 0 ? (totalIOOverhead / dataset.length).toFixed(2) : 0;
+      
+      // Filter for only NSGS-enabled records
+      const nsgsEnabled = dataset.filter(item => 
+        item.modelType.includes('nsgs') || item.parallelPathways > 0
+      );
+      
+      // Calculate neural spike statistics
+      const spikeStats = {
+        min: Number.MAX_VALUE,
+        max: 0,
+        avg: 0
+      };
+      
+      if (nsgsEnabled.length > 0) {
+        nsgsEnabled.forEach(item => {
+          const spikes = parseInt(item.neuralSpikes) || 0;
+          if (spikes > 0) {
+            spikeStats.min = Math.min(spikeStats.min, spikes);
+            spikeStats.max = Math.max(spikeStats.max, spikes);
+          }
+        });
+        spikeStats.avg = Math.round(totalSpikes / nsgsEnabled.length);
+        spikeStats.min = spikeStats.min === Number.MAX_VALUE ? 0 : spikeStats.min;
+      }
+      
+      // Get algorithm efficiency metrics
+      const algorithmEfficiency = {
+        loadBalancing: dataset.length > 0 ? 
+          dataset.reduce((sum, item) => sum + parseFloat(item.loadBalancingEfficiency || 0), 0) / dataset.length : 0,
+        resourceUtilization: dataset.length > 0 ?
+          dataset.reduce((sum, item) => sum + parseFloat(item.resourceUtilizationScore || 0), 0) / dataset.length : 0,
+        branchPrediction: dataset.length > 0 ?
+          dataset.reduce((sum, item) => sum + parseFloat(item.branchPredictionAccuracy || 0), 0) / dataset.length : 0
+      };
+      
+      res.json({
+        count: dataset.length,
+        nsgsEnabledCount: nsgsEnabled.length,
+        summary: {
+          avgSpeedup,
+          maxSpeedup: maxSpeedup.toFixed(2),
+          minSpeedup: minSpeedup === Number.MAX_VALUE ? 0 : minSpeedup.toFixed(2),
+          avgNodes,
+          avgPaths,
+          avgSpikes,
+          avgSyncPoints,
+          avgBottleneckReduction: avgBottleneckReduction + '%',
+          // Add timing breakdowns
+          avgPreprocessTime: avgPreprocessTime + ' ms',
+          avgInferenceTime: avgInferenceTime + ' ms',
+          avgPostprocessTime: avgPostprocessTime + ' ms',
+          avgIOOverhead: avgIOOverhead + ' ms'
+        },
+        neuralSpikes: {
+          min: spikeStats.min,
+          max: spikeStats.max,
+          avg: spikeStats.avg
+        },
+        algorithmEfficiency: {
+          loadBalancing: algorithmEfficiency.loadBalancing.toFixed(2) + '%',
+          resourceUtilization: algorithmEfficiency.resourceUtilization.toFixed(2) + '/10',
+          branchPrediction: algorithmEfficiency.branchPrediction.toFixed(2) + '%'
+        },
+        data: dataset
+      });
+    }
+  } catch (error) {
+    console.error(`Error retrieving NSGS dataset: ${error.message}`);
+    res.status(500).json({ error: 'Failed to retrieve NSGS dataset', details: error.message });
+  }
+});
+
+// Add endpoint for YOLOv8-specific dataset
+app.get('/yolov8-dataset', async (req, res) => {
+  try {
+    const format = req.query.format?.toLowerCase() || 'json';
+    
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=yolov8-algorithm-data.csv');
+      
+      // Stream the CSV file from the datasets directory
+      const csvPath = path.join(__dirname, 'datasets', 'yolov8AlgorithmData.csv');
+      if (fs.existsSync(csvPath)) {
+        fs.createReadStream(csvPath).pipe(res);
+      } else {
+        res.status(404).json({ error: 'YOLOv8 dataset file not found' });
+      }
+    } else {
+      // Return JSON format
+      const dataset = await yolov8DataLogger.getDataset();
+      
+      // Calculate summary statistics
+      let totalExecTime = 0;
+      let maxExecTime = 0;
+      let minExecTime = Number.MAX_VALUE;
+      let totalLayerDepth = 0;
+      let totalFlops = 0;
+      
+      dataset.forEach(entry => {
+        const execTime = parseFloat(entry.executionTime) || 0;
+        if (execTime > 0) {
+          totalExecTime += execTime;
+          maxExecTime = Math.max(maxExecTime, execTime);
+          minExecTime = Math.min(minExecTime, execTime);
+        }
+        
+        totalLayerDepth += parseInt(entry.layerDepth) || 0;
+        totalFlops += parseFloat(entry.inferenceFlops) || 0;
+      });
+      
+      const avgExecTime = dataset.length > 0 ? (totalExecTime / dataset.length).toFixed(2) : 0;
+      const avgLayerDepth = dataset.length > 0 ? Math.round(totalLayerDepth / dataset.length) : 0;
+      const avgFlops = dataset.length > 0 ? (totalFlops / dataset.length).toFixed(2) : 0;
+      
+      // Calculate timing breakdowns
+      let totalPreprocessTime = 0;
+      let totalInferenceTime = 0;
+      let totalPostprocessTime = 0;
+      let totalIOOverhead = 0;
+      
+      dataset.forEach(entry => {
+        totalPreprocessTime += parseFloat(entry.preprocessTime) || 0;
+        totalInferenceTime += parseFloat(entry.inferenceTime) || 0;
+        totalPostprocessTime += parseFloat(entry.postprocessTime) || 0;
+        totalIOOverhead += parseFloat(entry.ioOverhead) || 0;
+      });
+      
+      const avgPreprocessTime = dataset.length > 0 ? (totalPreprocessTime / dataset.length).toFixed(2) : 0;
+      const avgInferenceTime = dataset.length > 0 ? (totalInferenceTime / dataset.length).toFixed(2) : 0;
+      const avgPostprocessTime = dataset.length > 0 ? (totalPostprocessTime / dataset.length).toFixed(2) : 0;
+      const avgIOOverhead = dataset.length > 0 ? (totalIOOverhead / dataset.length).toFixed(2) : 0;
+      
+      // Filter for detection vs segmentation models
+      const detectionEntries = dataset.filter(item => 
+        !item.modelType.includes('seg') && item.modelType.includes('yolov8')
+      );
+      
+      const segmentationEntries = dataset.filter(item => 
+        item.modelType.includes('seg') && item.modelType.includes('yolov8')
+      );
+      
+      // Calculate model-specific averages
+      const detectionAvgTime = detectionEntries.length > 0 ? 
+        detectionEntries.reduce((sum, item) => sum + parseFloat(item.executionTime || 0), 0) / detectionEntries.length : 0;
+      
+      const segmentationAvgTime = segmentationEntries.length > 0 ? 
+        segmentationEntries.reduce((sum, item) => sum + parseFloat(item.executionTime || 0), 0) / segmentationEntries.length : 0;
+      
+      res.json({
+        count: dataset.length,
+        detectionCount: detectionEntries.length,
+        segmentationCount: segmentationEntries.length,
+        summary: {
+          avgExecutionTime: avgExecTime + ' ms',
+          maxExecutionTime: maxExecTime.toFixed(2) + ' ms',
+          minExecutionTime: minExecTime === Number.MAX_VALUE ? 0 : minExecTime.toFixed(2) + ' ms',
+          avgLayerDepth,
+          avgInferenceFlops: avgFlops + ' GFLOPs',
+          detectionAvgTime: detectionAvgTime.toFixed(2) + ' ms',
+          segmentationAvgTime: segmentationAvgTime.toFixed(2) + ' ms',
+          performanceRatio: detectionAvgTime > 0 ? (segmentationAvgTime / detectionAvgTime).toFixed(2) : 'N/A',
+          // Add timing breakdowns
+          avgPreprocessTime: avgPreprocessTime + ' ms',
+          avgInferenceTime: avgInferenceTime + ' ms', 
+          avgPostprocessTime: avgPostprocessTime + ' ms',
+          avgIOOverhead: avgIOOverhead + ' ms'
+        },
+        data: dataset
+      });
+    }
+  } catch (error) {
+    console.error(`Error retrieving YOLOv8 dataset: ${error.message}`);
+    res.status(500).json({ error: 'Failed to retrieve YOLOv8 dataset', details: error.message });
+  }
 });
 
 // Error handler middleware

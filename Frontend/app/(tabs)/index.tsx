@@ -548,31 +548,29 @@ export default function DetectScreen() {
   const renderNsgsMetrics = useCallback(() => {
     if (!processedImage || !useNSGS) return null;
     
-    // Get current theme values directly from context to avoid reference errors
-    const { theme: currentTheme, isDarkMode: currentIsDarkMode } = useTheme();
-    
+    // Use theme from component level instead of calling useTheme() inside this function
     return (
       <View style={[styles.nsgsMetricsContainer, {
-        backgroundColor: currentTheme.card,
-        ...(currentIsDarkMode ? {} : CARD_SHADOW)
+        backgroundColor: theme.card,
+        ...(isDarkMode ? {} : CARD_SHADOW)
       }]}>
-        <Text style={[styles.nsgsMetricsTitle, { color: currentTheme.text }]}>NSGS Processing Metrics</Text>
+        <Text style={[styles.nsgsMetricsTitle, { color: theme.text }]}>NSGS Processing Metrics</Text>
         
         <View style={styles.nsgsMetricsRow}>
           <View style={[styles.nsgsMetricBlock, {
-            backgroundColor: currentIsDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
+            backgroundColor: isDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
           }]}>
-            <Text style={[styles.nsgsMetricLabel, { color: currentTheme.textSecondary }]}>Graph Nodes</Text>
-            <Text style={[styles.nsgsMetricValue, { color: currentTheme.text }]}>
+            <Text style={[styles.nsgsMetricLabel, { color: theme.textSecondary }]}>Graph Nodes</Text>
+            <Text style={[styles.nsgsMetricValue, { color: theme.text }]}>
               {nsgsProcessingStats.graphNodes.toLocaleString()}
             </Text>
           </View>
           
           <View style={[styles.nsgsMetricBlock, {
-            backgroundColor: currentIsDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
+            backgroundColor: isDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
           }]}>
-            <Text style={[styles.nsgsMetricLabel, { color: currentTheme.textSecondary }]}>Processed Spikes</Text>
-            <Text style={[styles.nsgsMetricValue, { color: currentTheme.text }]}>
+            <Text style={[styles.nsgsMetricLabel, { color: theme.textSecondary }]}>Processed Spikes</Text>
+            <Text style={[styles.nsgsMetricValue, { color: theme.text }]}>
               {nsgsProcessingStats.processedSpikes.toLocaleString()}
             </Text>
           </View>
@@ -580,35 +578,35 @@ export default function DetectScreen() {
         
         <View style={styles.nsgsMetricsRow}>
           <View style={[styles.nsgsMetricBlock, {
-            backgroundColor: currentIsDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
+            backgroundColor: isDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
           }]}>
-            <Text style={[styles.nsgsMetricLabel, { color: currentTheme.textSecondary }]}>Queue Size</Text>
-            <Text style={[styles.nsgsMetricValue, { color: currentTheme.text }]}>
+            <Text style={[styles.nsgsMetricLabel, { color: theme.textSecondary }]}>Queue Size</Text>
+            <Text style={[styles.nsgsMetricValue, { color: theme.text }]}>
               {nsgsProcessingStats.queueSize.toLocaleString()}
             </Text>
           </View>
           
           <View style={[styles.nsgsMetricBlock, {
-            backgroundColor: currentIsDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
+            backgroundColor: isDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
           }]}>
-            <Text style={[styles.nsgsMetricLabel, { color: currentTheme.textSecondary }]}>Adaptation</Text>
-            <Text style={[styles.nsgsMetricValue, { color: currentTheme.text }]}>
+            <Text style={[styles.nsgsMetricLabel, { color: theme.textSecondary }]}>Adaptation</Text>
+            <Text style={[styles.nsgsMetricValue, { color: theme.text }]}>
               {nsgsProcessingStats.adaptationMultiplier.toFixed(5)}x
             </Text>
           </View>
         </View>
         
         <View style={[styles.nsgsMetricsTimeContainer, {
-          backgroundColor: currentIsDarkMode ? 'rgba(100, 53, 217, 0.1)' : 'rgba(106, 53, 217, 0.08)'
+          backgroundColor: isDarkMode ? 'rgba(100, 53, 217, 0.1)' : 'rgba(106, 53, 217, 0.08)'
         }]}>
-          <Text style={[styles.nsgsMetricsTimeLabel, { color: currentTheme.textSecondary }]}>Processing Time</Text>
+          <Text style={[styles.nsgsMetricsTimeLabel, { color: theme.textSecondary }]}>Processing Time</Text>
           <Text style={styles.nsgsMetricsTimeValue}>
             {nsgsProcessingStats.processingTime.toFixed(2)}s
           </Text>
         </View>
       </View>
     );
-  }, [processedImage, useNSGS, nsgsProcessingStats]);
+  }, [processedImage, useNSGS, nsgsProcessingStats, theme, isDarkMode]);
 
   // Render the triangle loading animation
   const renderTriangleLoading = () => {

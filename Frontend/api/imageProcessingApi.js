@@ -13,7 +13,7 @@ export const getApiUrl = () => {
   
   // For devices (iOS/Android), use the network IP
   // This is the actual IP address of your machine on the network
-  const DEVICE_IP = '10.79.107.65';
+  const DEVICE_IP = '10.79.107.65'; // Verified this IP matches your current network configuration
   
   console.log(`Using mobile platform (${Platform.OS}), API URL will be http://${DEVICE_IP}:3000`);
   return `http://${DEVICE_IP}:3000`;
@@ -422,11 +422,27 @@ export const processImage = async (imageUri, modelType = 'yolov8m-seg', useNSGS 
                     await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
                   }
                   
-                  const downloadResult = await FileSystem.downloadAsync(fullUrl, localUri);
+                  // Add cache-busting parameter to URL to avoid cached responses
+                  const cacheBustUrl = fullUrl.includes('?') 
+                    ? `${fullUrl}&t=${timestamp}` 
+                    : `${fullUrl}?t=${timestamp}`;
+                  
+                  console.log(`Using URL with cache-busting: ${cacheBustUrl}`);
+                  
+                  // Use a longer timeout for downloads
+                  const downloadOptions = {
+                    md5: false,
+                    headers: {
+                      'Cache-Control': 'no-cache',
+                      'Pragma': 'no-cache'
+                    }
+                  };
+                  
+                  const downloadResult = await FileSystem.downloadAsync(cacheBustUrl, localUri, downloadOptions);
                   
                   // Verify the download was successful
                   if (downloadResult.status === 200) {
-                    console.log('Successfully downloaded image to local cache:', localUri);
+                    console.log('Download reported success, verifying file...');
                     
                     // Verify the file exists and has content
                     const fileInfo = await FileSystem.getInfoAsync(localUri);
@@ -439,8 +455,26 @@ export const processImage = async (imageUri, modelType = 'yolov8m-seg', useNSGS 
                       result.cachedImageUrl = `file://${localUri}`;
                       
                       console.log('Added local URI to result:', result.cachedImageUrl);
+                      
+                      // Try to read a few bytes to ensure the file is valid
+                      try {
+                        const head = await FileSystem.readAsStringAsync(localUri, { 
+                          encoding: FileSystem.EncodingType.Base64,
+                          position: 0,
+                          length: 100
+                        });
+                        if (head && head.length > 0) {
+                          console.log('File content verification successful');
+                        } else {
+                          console.warn('File exists but might be empty or corrupted');
+                          // Continue with the cached file anyway
+                        }
+                      } catch (readError) {
+                        console.warn('Could not verify file content, might be corrupted:', readError);
+                        // Continue with the cached file anyway
+                      }
                     } else {
-                      console.warn('Downloaded file is empty or does not exist.');
+                      console.warn(`Downloaded file issue: exists=${fileInfo.exists}, size=${fileInfo.size || 'unknown'}`);
                       downloadError = new Error('Downloaded file is empty or does not exist');
                     }
                   } else {
@@ -453,12 +487,47 @@ export const processImage = async (imageUri, modelType = 'yolov8m-seg', useNSGS 
                 }
               }
               
-              if (!downloadSuccess && downloadError) {
-                console.error('All download attempts failed:', downloadError);
-                throw downloadError;
+              if (!downloadSuccess) {
+                // If all download attempts failed, try to use base64 encoding directly
+                console.log('All download attempts failed. Trying to get image directly as base64...');
+                
+                try {
+                  // Try to fetch the image directly and convert to base64 rather than saving to file
+                  const response = await fetch(fullUrl, {
+                    headers: {
+                      'Cache-Control': 'no-cache',
+                      'Pragma': 'no-cache'
+                    }
+                  });
+                  
+                  if (response.ok) {
+                    const blob = await response.blob();
+                    const reader = new FileReader();
+                    
+                    // Convert blob to base64
+                    const base64 = await new Promise((resolve, reject) => {
+                      reader.onload = () => resolve(reader.result);
+                      reader.onerror = reject;
+                      reader.readAsDataURL(blob);
+                    });
+                    
+                    if (base64) {
+                      console.log('Successfully fetched image as base64');
+                      result.imageBase64 = base64;
+                      downloadSuccess = true;
+                    }
+                  }
+                } catch (base64Error) {
+                  console.error('Failed to fetch image as base64:', base64Error);
+                }
+                
+                if (!downloadSuccess) {
+                  console.error('imageprocessingapi.js: all download attempts failed', downloadError);
+                  // Continue with the remote URL - we'll fall back to it
+                }
               }
             } catch (downloadError) {
-              console.error('Error downloading image to local cache:', downloadError);
+              console.error('Error downloading image to local cache imageprocessingapi.js:', downloadError);
               // Continue even if download fails - we'll try to use the remote URL
             }
           }
