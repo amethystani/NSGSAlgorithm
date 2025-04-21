@@ -60,7 +60,7 @@ To build and run the project, you need:
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/username/nsgs.git
+git clone https://github.com/amethystani/nsgs.git
 cd nsgs
 ```
 
