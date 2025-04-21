@@ -446,16 +446,6 @@ const processImage = async (imageUri) => {
 | **Desktop**   | 4-core CPU, 8GB RAM, OpenCV 4.5            | 8-core CPU, 16GB RAM, CUDA-capable GPU |
 | **Server**    | 8-core CPU, 16GB RAM                       | 16+ core CPU, 32GB+ RAM, NVIDIA A4000+ |
 
-## Roadmap
-
-- [x] Core NSGS implementation
-- [x] Integration with YOLOv8 and Mobile SAM baselines
-- [x] Mobile application implementation
-- [x] Performance benchmarking
-- [ ] TensorRT optimizations (Coming Q3 2023)
-- [ ] Distributed processing for large images (Coming Q4 2023)
-- [ ] Video segmentation support (Coming Q1 2024)
-- [ ] Integration with hardware accelerators (Coming Q2 2024)
 
 ## Contributing
 
