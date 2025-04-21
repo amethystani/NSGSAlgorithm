@@ -476,7 +476,7 @@ See the [contributing guidelines](CONTRIBUTING.md) for more information.
 
 ## Acknowledgments
 
-- This research was part of the course Parallel & Concurrent Processing.
+- This research was part of the course Parallel & Concurrent Programming.
 - Special thanks to Dr. Prof. Archit Somani for his guidance and insightful discussions.
 ## Contact
 
