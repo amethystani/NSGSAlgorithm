@@ -20,10 +20,6 @@ Key advantages:
 - **Adaptive resource management** based on system load and thermal constraints
 - **Efficient real-time processing** on resource-constrained platforms
 
-<p align="center">
-  <img src="docs/nsgs_architecture.png" alt="NSGS Architecture" width="600"/>
-</p>
-
 ## Project Structure
 
 - **Frontend**: React Native (Expo) mobile application
@@ -329,9 +325,6 @@ The mobile app allows users to:
 - View processing time and resource usage
 - Download processed images
 
-<p align="center">
-  <img src="docs/mobile_app_screenshot.png" alt="Mobile App" width="300"/>
-</p>
 
 ## API Endpoints
 
@@ -359,22 +352,9 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 [MIT License](LICENSE)
 
-## Citation
-
-If you use NSGS in your research, please cite our paper:
-
-```bibtex
-@inproceedings{mishra2023nsgs,
-  title={Neuro-Scheduling for Graph Segmentation (NSGS): An Event-Driven Approach to Parallel Image Processing},
-  author={Mishra, Animesh and Srivastava, Aryaman},
-  booktitle={Proceedings of the International Conference on Computer Vision and Pattern Recognition},
-  year={2023}
-}
-```
 
 ## Contact
 
 Animesh Mishra - am847@snu.edu.in
-Aryaman Srivastava - as533@snu.edu.in
 
-Project Link: [https://github.com/username/nsgs](https://github.com/username/nsgs) 
+Project Link: [https://github.com/amethystani/nsgs](https://github.com/amethystani/nsgs) 
