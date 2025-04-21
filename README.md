@@ -2,8 +2,6 @@
 
 <div align="center">
 
-![NSGS Logo](https://via.placeholder.com/150?text=NSGS)
-
 *An Event-Driven Approach to Parallel Image Processing*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -11,10 +9,8 @@
 [![Platform: iOS/Android](https://img.shields.io/badge/Platform-iOS%20%7C%20Android-green)]()
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![Code Coverage](https://img.shields.io/badge/coverage-87%25-brightgreen)]()
-[![arXiv](https://img.shields.io/badge/arXiv-2305.XXXXX-b31b1b.svg)](https://arxiv.org)
-[![DOI](https://img.shields.io/badge/DOI-10.1109%2FXXX.XXX-blue)](https://doi.org)
 
-[Paper](Report/FinalReport.pdf) | [Demo App](https://expo.dev/@nsgs/demo) | [Benchmark Results](https://github.com/amethystani/nsgs/wiki/Benchmark-Results) | [Documentation](https://amethystani.github.io/nsgs/)
+[Paper](Report/FinalReport.pdf) | [Documentation](https://amethystani.github.io/nsgs/)
 
 </div>
 
@@ -22,9 +18,6 @@
 
 NSGS is a novel image segmentation framework inspired by neuromorphic computing principles. It models image regions as computational units (analogous to neurons) that communicate asynchronously via events ("spikes") triggered by local state changes exceeding adaptive thresholds. This event-driven paradigm facilitates inherent parallelism with minimal synchronization overhead, dynamically focusing computation on information-rich areas.
 
-<div align="center">
-<img src="https://via.placeholder.com/800x400?text=NSGS+Architecture+Diagram" alt="NSGS Architecture" width="80%"/>
-</div>
 
 Key advantages:
 - **Significant speedups (1.5-2.2x)** over traditional parallel approaches
@@ -49,12 +42,6 @@ cd Frontend
 npm run dev
 ```
 
-<details>
-<summary>📱 Click to see mobile app demo</summary>
-<div align="center">
-<img src="https://via.placeholder.com/300x600?text=NSGS+Mobile+App" alt="Mobile App Demo" width="300"/>
-</div>
-</details>
 
 ## Project Structure
 
@@ -382,9 +369,6 @@ void workerThread(SpikeQueue<Event>& queue, std::atomic<bool>& running) {
 
 NSGS achieves significant performance improvements over traditional methods:
 
-<div align="center">
-<img src="https://via.placeholder.com/600x400?text=Performance+Comparison+Graph" alt="Performance Comparison" width="80%"/>
-</div>
 
 | Metric                  | NSGS  | YOLOv8 | Mobile SAM |
 |-------------------------|-------|--------|------------|
@@ -396,22 +380,6 @@ NSGS achieves significant performance improvements over traditional methods:
 
 For detailed performance analysis, see the [technical paper](Report/FinalReport.pdf).
 
-## Visualization Results
-
-<div align="center">
-<table>
-  <tr>
-    <td align="center"><img src="https://via.placeholder.com/200?text=Input" alt="Input Image"/></td>
-    <td align="center"><img src="https://via.placeholder.com/200?text=NSGS" alt="NSGS Result"/></td>
-    <td align="center"><img src="https://via.placeholder.com/200?text=YOLOv8" alt="YOLOv8 Result"/></td>
-  </tr>
-  <tr>
-    <td align="center">Input Image</td>
-    <td align="center">NSGS (1.3s)</td>
-    <td align="center">YOLOv8 (9.2s)</td>
-  </tr>
-</table>
-</div>
 
 ## Mobile Application
 
@@ -421,16 +389,6 @@ The mobile app allows users to:
 - Compare results side-by-side
 - View processing time and resource usage
 - Download processed images
-
-<div align="center">
-<table>
-  <tr>
-    <td align="center"><img src="https://via.placeholder.com/180x360?text=Camera+Screen" alt="Camera Screen"/></td>
-    <td align="center"><img src="https://via.placeholder.com/180x360?text=Processing" alt="Processing Screen"/></td>
-    <td align="center"><img src="https://via.placeholder.com/180x360?text=Results" alt="Results Screen"/></td>
-  </tr>
-</table>
-</div>
 
 ## API Endpoints
 
@@ -488,16 +446,6 @@ const processImage = async (imageUri) => {
 | **Desktop**   | 4-core CPU, 8GB RAM, OpenCV 4.5            | 8-core CPU, 16GB RAM, CUDA-capable GPU |
 | **Server**    | 8-core CPU, 16GB RAM                       | 16+ core CPU, 32GB+ RAM, NVIDIA A4000+ |
 
-## Roadmap
-
-- [x] Core NSGS implementation
-- [x] Integration with YOLOv8 and Mobile SAM baselines
-- [x] Mobile application implementation
-- [x] Performance benchmarking
-- [ ] TensorRT optimizations (Coming Q3 2023)
-- [ ] Distributed processing for large images (Coming Q4 2023)
-- [ ] Video segmentation support (Coming Q1 2024)
-- [ ] Integration with hardware accelerators (Coming Q2 2024)
 
 ## Contributing
 
@@ -517,20 +465,7 @@ See the [contributing guidelines](CONTRIBUTING.md) for more information.
 
 [MIT License](LICENSE)
 
-## How to Cite
 
-If you use NSGS in your research, please cite our paper:
-
-```bibtex
-@inproceedings{mishra2023nsgs,
-  title={Neuro-Scheduling for Graph Segmentation (NSGS): An Event-Driven Approach to Parallel Image Processing},
-  author={Mishra, Animesh and Srivastava, Aryaman},
-  booktitle={Proceedings of the International Conference on Computer Vision and Pattern Recognition},
-  year={2023},
-  pages={1145--1154},
-  organization={IEEE}
-}
-```
 
 ## Related Projects
 
@@ -541,20 +476,12 @@ If you use NSGS in your research, please cite our paper:
 
 ## Acknowledgments
 
-- This research was supported in part by a grant from the SNU Research Initiative.
-- We thank the Parallel Computing Lab at SNU for providing computational resources.
-- Special thanks to Prof. John Smith for his guidance and insightful discussions.
-- Icons and graphics by [Freepik](https://www.freepik.com/).
-
+- This research was part of the course Parallel & Concurrent Programming.
+- Special thanks to Dr. Prof. Archit Somani for his guidance and insightful discussions.
 ## Contact
 
-Animesh Mishra - [am847@snu.edu.in](mailto:am847@snu.edu.in) - [@amethystani](https://twitter.com/amethystani)
+Animesh Mishra - [am847@snu.edu.in](mailto:am847@snu.edu.in)
 
 Project Link: [https://github.com/amethystani/nsgs](https://github.com/amethystani/nsgs) 
 
 ---
-
-<div align="center">
-<p>Built with ❤️ by the NSGS Team</p>
-<img src="https://via.placeholder.com/800x100?text=University+Logos" alt="Institutional Logos" width="80%"/>
-</div>
