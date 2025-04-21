@@ -1,0 +1,491 @@
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1621.28 ms
+ONNX Model Export: 2000.15 ms
+ONNX Model Quantization: 606.0 ms
+Image Loading: 15.29 ms
+Image Loading: 31.7 ms
+Image Loading: 13.18 ms
+ONNX Runtime Initialization: 319.23 ms
+Set Image in Predictor: 4367.7 ms
+Set Image in Predictor: 6501.63 ms
+Image Embedding Generation: 0.21 ms
+Image Embedding Generation: 0.22 ms
+Point Input Prediction: 119.32 ms
+Box and Point Input Prediction: 148.03 ms
+Full Model ONNX Export: 8086.69 ms
+Native Predictor.predict: 227.07 ms
+Full Segmentation Process: 54617.6 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1287.79 ms
+ONNX Model Export: 2409.97 ms
+ONNX Model Quantization: 588.44 ms
+Image Loading: 14.61 ms
+Image Loading: 13.3 ms
+Image Loading: 6.09 ms
+ONNX Runtime Initialization: 584.85 ms
+Set Image in Predictor: 5486.87 ms
+Set Image in Predictor: 4120.16 ms
+Image Embedding Generation: 0.41 ms
+Image Embedding Generation: 0.46 ms
+Point Input Prediction: 126.0 ms
+Box and Point Input Prediction: 180.48 ms
+Box and Point Input Prediction: 128.24 ms
+Full Model ONNX Export: 9810.58 ms
+Native Predictor.predict: 238.09 ms
+Full Segmentation Process: 78449.9 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 2471.29 ms
+ONNX Model Export: 2973.89 ms
+ONNX Model Quantization: 1234.48 ms
+Image Loading: 49.56 ms
+Image Loading: 25.15 ms
+Image Loading: 12.22 ms
+ONNX Runtime Initialization: 532.18 ms
+Set Image in Predictor: 6875.96 ms
+Set Image in Predictor: 6101.79 ms
+Image Embedding Generation: 0.32 ms
+Image Embedding Generation: 0.32 ms
+Point Input Prediction: 123.06 ms
+Box and Point Input Prediction: 137.23 ms
+Full Model ONNX Export: 8988.77 ms
+Native Predictor.predict: 226.38 ms
+Full Segmentation Process: 75576.47 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1107.17 ms
+ONNX Model Export: 2594.72 ms
+ONNX Model Quantization: 862.88 ms
+Image Loading: 23.45 ms
+Image Loading: 17.11 ms
+Image Loading: 6.75 ms
+ONNX Runtime Initialization: 412.01 ms
+Set Image in Predictor: 4041.41 ms
+Set Image in Predictor: 5454.13 ms
+Image Embedding Generation: 0.18 ms
+Image Embedding Generation: 0.43 ms
+Point Input Prediction: 142.23 ms
+Box and Point Input Prediction: 195.24 ms
+Full Model ONNX Export: 9672.23 ms
+Native Predictor.predict: 212.64 ms
+Full Segmentation Process: 68667.77 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1357.59 ms
+ONNX Model Export: 3315.42 ms
+ONNX Model Quantization: 354.86 ms
+Image Loading: 34.21 ms
+Image Loading: 24.55 ms
+Image Loading: 4.44 ms
+ONNX Runtime Initialization: 396.41 ms
+Set Image in Predictor: 3423.47 ms
+Set Image in Predictor: 4455.26 ms
+Image Embedding Generation: 0.17 ms
+Image Embedding Generation: 0.27 ms
+Point Input Prediction: 117.88 ms
+Box and Point Input Prediction: 190.94 ms
+Full Model ONNX Export: 9470.4 ms
+Native Predictor.predict: 221.81 ms
+Full Segmentation Process: 37125.73 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 2455.12 ms
+ONNX Model Export: 1900.13 ms
+ONNX Model Quantization: 1232.46 ms
+Image Loading: 1.97 ms
+Image Loading: 19.44 ms
+Image Loading: 46.81 ms
+ONNX Runtime Initialization: 220.5 ms
+Set Image in Predictor: 5946.49 ms
+Set Image in Predictor: 6621.15 ms
+Image Embedding Generation: 0.18 ms
+Image Embedding Generation: 0.3 ms
+Point Input Prediction: 125.94 ms
+Box and Point Input Prediction: 178.71 ms
+Box and Point Input Prediction: 197.31 ms
+Full Model ONNX Export: 10586.8 ms
+Native Predictor.predict: 215.17 ms
+Full Segmentation Process: 72362.72 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 2267.71 ms
+ONNX Model Export: 2659.78 ms
+ONNX Model Quantization: 1148.53 ms
+Image Loading: 32.22 ms
+Image Loading: 10.14 ms
+Image Loading: 10.73 ms
+ONNX Runtime Initialization: 382.32 ms
+Set Image in Predictor: 3819.02 ms
+Set Image in Predictor: 6051.04 ms
+Image Embedding Generation: 0.31 ms
+Image Embedding Generation: 0.27 ms
+Point Input Prediction: 102.12 ms
+Box and Point Input Prediction: 125.36 ms
+Box and Point Input Prediction: 202.39 ms
+Full Model ONNX Export: 11376.9 ms
+Native Predictor.predict: 237.29 ms
+Full Segmentation Process: 44451.37 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1529.8 ms
+ONNX Model Export: 1529.15 ms
+ONNX Model Quantization: 1138.26 ms
+Image Loading: 26.55 ms
+Image Loading: 39.91 ms
+Image Loading: 27.81 ms
+ONNX Runtime Initialization: 262.03 ms
+Set Image in Predictor: 6816.41 ms
+Set Image in Predictor: 3431.0 ms
+Image Embedding Generation: 0.34 ms
+Image Embedding Generation: 0.4 ms
+Point Input Prediction: 141.38 ms
+Box and Point Input Prediction: 209.52 ms
+Box and Point Input Prediction: 130.93 ms
+Full Model ONNX Export: 10416.01 ms
+Native Predictor.predict: 236.56 ms
+Full Segmentation Process: 47557.58 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1507.27 ms
+ONNX Model Export: 2856.05 ms
+ONNX Model Quantization: 531.4 ms
+Image Loading: 14.69 ms
+Image Loading: 32.83 ms
+Image Loading: 31.24 ms
+ONNX Runtime Initialization: 388.37 ms
+Set Image in Predictor: 6386.78 ms
+Set Image in Predictor: 5856.48 ms
+Image Embedding Generation: 0.17 ms
+Image Embedding Generation: 0.3 ms
+Point Input Prediction: 126.51 ms
+Box and Point Input Prediction: 145.52 ms
+Box and Point Input Prediction: 169.46 ms
+Full Model ONNX Export: 11019.81 ms
+Native Predictor.predict: 244.45 ms
+Full Segmentation Process: 42348.04 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1007.8 ms
+ONNX Model Export: 3055.41 ms
+ONNX Model Quantization: 699.75 ms
+Image Loading: 22.16 ms
+Image Loading: 33.54 ms
+Image Loading: 43.67 ms
+ONNX Runtime Initialization: 400.46 ms
+Set Image in Predictor: 6433.87 ms
+Set Image in Predictor: 3874.69 ms
+Image Embedding Generation: 0.3 ms
+Image Embedding Generation: 0.23 ms
+Point Input Prediction: 104.83 ms
+Box and Point Input Prediction: 201.84 ms
+Box and Point Input Prediction: 182.05 ms
+Full Model ONNX Export: 9024.87 ms
+Native Predictor.predict: 232.83 ms
+Full Segmentation Process: 56239.55 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 901.82 ms
+ONNX Model Export: 1685.13 ms
+ONNX Model Quantization: 675.68 ms
+Image Loading: 27.85 ms
+Image Loading: 10.67 ms
+Image Loading: 32.21 ms
+ONNX Runtime Initialization: 327.81 ms
+Set Image in Predictor: 5444.42 ms
+Set Image in Predictor: 6002.36 ms
+Image Embedding Generation: 0.23 ms
+Image Embedding Generation: 0.17 ms
+Point Input Prediction: 107.72 ms
+Box and Point Input Prediction: 165.22 ms
+Box and Point Input Prediction: 158.13 ms
+Full Model ONNX Export: 8114.73 ms
+Native Predictor.predict: 218.45 ms
+Full Segmentation Process: 47777.39 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 782.4 ms
+ONNX Model Export: 3298.8 ms
+ONNX Model Quantization: 1464.99 ms
+Image Loading: 17.35 ms
+Image Loading: 36.66 ms
+Image Loading: 29.53 ms
+ONNX Runtime Initialization: 244.55 ms
+Set Image in Predictor: 5632.77 ms
+Set Image in Predictor: 4400.15 ms
+Image Embedding Generation: 0.19 ms
+Image Embedding Generation: 0.36 ms
+Point Input Prediction: 141.52 ms
+Box and Point Input Prediction: 177.39 ms
+Box and Point Input Prediction: 131.44 ms
+Full Model ONNX Export: 10056.48 ms
+Native Predictor.predict: 224.23 ms
+Full Segmentation Process: 42681.71 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1584.54 ms
+ONNX Model Export: 3134.72 ms
+ONNX Model Quantization: 784.02 ms
+Image Loading: 10.34 ms
+Image Loading: 19.15 ms
+Image Loading: 33.12 ms
+ONNX Runtime Initialization: 241.73 ms
+Set Image in Predictor: 4326.17 ms
+Set Image in Predictor: 5687.68 ms
+Image Embedding Generation: 0.27 ms
+Image Embedding Generation: 0.21 ms
+Point Input Prediction: 105.13 ms
+Box and Point Input Prediction: 121.4 ms
+Full Model ONNX Export: 8044.13 ms
+Native Predictor.predict: 223.27 ms
+Full Segmentation Process: 41597.59 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1762.88 ms
+ONNX Model Export: 1843.13 ms
+ONNX Model Quantization: 751.69 ms
+Image Loading: 48.26 ms
+Image Loading: 48.55 ms
+Image Loading: 1.09 ms
+ONNX Runtime Initialization: 336.32 ms
+Set Image in Predictor: 4451.95 ms
+Set Image in Predictor: 4009.14 ms
+Image Embedding Generation: 0.37 ms
+Image Embedding Generation: 0.38 ms
+Point Input Prediction: 145.59 ms
+Box and Point Input Prediction: 178.19 ms
+Box and Point Input Prediction: 189.34 ms
+Full Model ONNX Export: 9401.78 ms
+Native Predictor.predict: 249.55 ms
+Full Segmentation Process: 45398.4 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 380.98 ms
+ONNX Model Export: 3101.28 ms
+ONNX Model Quantization: 1067.44 ms
+Image Loading: 24.08 ms
+Image Loading: 4.35 ms
+Image Loading: 4.13 ms
+ONNX Runtime Initialization: 429.61 ms
+Set Image in Predictor: 6619.79 ms
+Set Image in Predictor: 3652.83 ms
+Image Embedding Generation: 0.47 ms
+Image Embedding Generation: 0.14 ms
+Point Input Prediction: 130.53 ms
+Box and Point Input Prediction: 124.19 ms
+Box and Point Input Prediction: 143.09 ms
+Full Model ONNX Export: 8691.93 ms
+Native Predictor.predict: 226.74 ms
+Full Segmentation Process: 69933.06 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 367.26 ms
+ONNX Model Export: 1904.98 ms
+ONNX Model Quantization: 561.93 ms
+Image Loading: 3.43 ms
+Image Loading: 24.63 ms
+Image Loading: 34.15 ms
+ONNX Runtime Initialization: 420.54 ms
+Set Image in Predictor: 5362.49 ms
+Set Image in Predictor: 4577.23 ms
+Image Embedding Generation: 0.17 ms
+Image Embedding Generation: 0.43 ms
+Point Input Prediction: 143.13 ms
+Box and Point Input Prediction: 207.68 ms
+Box and Point Input Prediction: 178.12 ms
+Full Model ONNX Export: 7057.38 ms
+Native Predictor.predict: 213.09 ms
+Full Segmentation Process: 67576.26 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1189.28 ms
+ONNX Model Export: 3448.17 ms
+ONNX Model Quantization: 377.62 ms
+Image Loading: 7.04 ms
+Image Loading: 45.99 ms
+Image Loading: 8.3 ms
+ONNX Runtime Initialization: 253.82 ms
+Set Image in Predictor: 4772.29 ms
+Set Image in Predictor: 5964.79 ms
+Image Embedding Generation: 0.46 ms
+Image Embedding Generation: 0.28 ms
+Point Input Prediction: 134.93 ms
+Box and Point Input Prediction: 177.99 ms
+Box and Point Input Prediction: 189.27 ms
+Full Model ONNX Export: 10595.74 ms
+Native Predictor.predict: 224.22 ms
+Full Segmentation Process: 47036.67 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1878.48 ms
+ONNX Model Export: 1854.65 ms
+ONNX Model Quantization: 611.87 ms
+Image Loading: 27.01 ms
+Image Loading: 10.75 ms
+Image Loading: 33.03 ms
+ONNX Runtime Initialization: 551.88 ms
+Set Image in Predictor: 3940.12 ms
+Set Image in Predictor: 6410.12 ms
+Image Embedding Generation: 0.32 ms
+Image Embedding Generation: 0.17 ms
+Point Input Prediction: 106.6 ms
+Box and Point Input Prediction: 120.38 ms
+Box and Point Input Prediction: 127.47 ms
+Full Model ONNX Export: 8492.06 ms
+Native Predictor.predict: 201.32 ms
+Full Segmentation Process: 49827.15 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1232.15 ms
+ONNX Model Export: 2611.22 ms
+ONNX Model Quantization: 435.6 ms
+Image Loading: 28.37 ms
+Image Loading: 14.44 ms
+Image Loading: 30.39 ms
+ONNX Runtime Initialization: 372.06 ms
+Set Image in Predictor: 5243.11 ms
+Set Image in Predictor: 6587.24 ms
+Image Embedding Generation: 0.47 ms
+Image Embedding Generation: 0.25 ms
+Point Input Prediction: 137.2 ms
+Box and Point Input Prediction: 123.95 ms
+Full Model ONNX Export: 8697.0 ms
+Native Predictor.predict: 222.59 ms
+Full Segmentation Process: 68976.85 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 2331.16 ms
+ONNX Model Export: 3548.37 ms
+ONNX Model Quantization: 440.93 ms
+Image Loading: 47.9 ms
+Image Loading: 22.14 ms
+Image Loading: 35.5 ms
+ONNX Runtime Initialization: 599.53 ms
+Set Image in Predictor: 4108.09 ms
+Set Image in Predictor: 5391.54 ms
+Image Embedding Generation: 0.47 ms
+Image Embedding Generation: 0.14 ms
+Point Input Prediction: 108.94 ms
+Box and Point Input Prediction: 175.32 ms
+Full Model ONNX Export: 7868.32 ms
+Native Predictor.predict: 222.76 ms
+Full Segmentation Process: 48329.17 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 2013.65 ms
+ONNX Model Export: 2418.37 ms
+ONNX Model Quantization: 1079.16 ms
+Image Loading: 5.26 ms
+Image Loading: 37.94 ms
+Image Loading: 32.43 ms
+ONNX Runtime Initialization: 504.07 ms
+Set Image in Predictor: 6473.88 ms
+Set Image in Predictor: 4464.09 ms
+Image Embedding Generation: 0.31 ms
+Image Embedding Generation: 0.39 ms
+Point Input Prediction: 108.66 ms
+Box and Point Input Prediction: 204.06 ms
+Box and Point Input Prediction: 136.85 ms
+Full Model ONNX Export: 8846.58 ms
+Native Predictor.predict: 216.72 ms
+Full Segmentation Process: 50072.95 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 1552.83 ms
+ONNX Model Export: 2545.94 ms
+ONNX Model Quantization: 518.3 ms
+Image Loading: 42.87 ms
+Image Loading: 9.25 ms
+Image Loading: 23.88 ms
+ONNX Runtime Initialization: 568.1 ms
+Set Image in Predictor: 6621.95 ms
+Set Image in Predictor: 6431.56 ms
+Image Embedding Generation: 0.16 ms
+Image Embedding Generation: 0.14 ms
+Point Input Prediction: 119.59 ms
+Box and Point Input Prediction: 151.97 ms
+Box and Point Input Prediction: 173.28 ms
+Full Model ONNX Export: 11620.91 ms
+Native Predictor.predict: 220.17 ms
+Full Segmentation Process: 59148.25 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 251.13 ms
+ONNX Model Export: 3269.3 ms
+ONNX Model Quantization: 1258.11 ms
+Image Loading: 34.5 ms
+Image Loading: 49.85 ms
+Image Loading: 42.85 ms
+ONNX Runtime Initialization: 386.55 ms
+Set Image in Predictor: 3575.2 ms
+Set Image in Predictor: 5187.84 ms
+Image Embedding Generation: 0.24 ms
+Image Embedding Generation: 0.18 ms
+Point Input Prediction: 114.73 ms
+Box and Point Input Prediction: 203.03 ms
+Box and Point Input Prediction: 205.8 ms
+Full Model ONNX Export: 7363.47 ms
+Native Predictor.predict: 244.57 ms
+Full Segmentation Process: 43124.65 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 930.39 ms
+ONNX Model Export: 2077.86 ms
+ONNX Model Quantization: 759.41 ms
+Image Loading: 1.12 ms
+Image Loading: 39.13 ms
+Image Loading: 26.94 ms
+ONNX Runtime Initialization: 518.49 ms
+Set Image in Predictor: 4323.26 ms
+Set Image in Predictor: 5068.98 ms
+Image Embedding Generation: 0.39 ms
+Image Embedding Generation: 0.32 ms
+Point Input Prediction: 104.06 ms
+Box and Point Input Prediction: 180.58 ms
+Box and Point Input Prediction: 209.4 ms
+Full Model ONNX Export: 8152.65 ms
+Native Predictor.predict: 215.57 ms
+Full Segmentation Process: 48070.5 ms
+=======================================
+
+===== PERFORMANCE METRICS SUMMARY =====
+Model Loading: 206.43 ms
+ONNX Model Export: 3149.07 ms
+ONNX Model Quantization: 1219.87 ms
+Image Loading: 36.87 ms
+Image Loading: 35.5 ms
+Image Loading: 16.6 ms
+ONNX Runtime Initialization: 472.9 ms
+Set Image in Predictor: 5759.1 ms
+Set Image in Predictor: 5134.79 ms
+Image Embedding Generation: 0.45 ms
+Image Embedding Generation: 0.12 ms
+Point Input Prediction: 145.55 ms
+Box and Point Input Prediction: 176.05 ms
+Full Model ONNX Export: 9917.49 ms
+Native Predictor.predict: 238.44 ms
+Full Segmentation Process: 60054.9 ms
+=======================================
