@@ -1,9 +1,5 @@
 # Neuro-Scheduling for Graph Segmentation (NSGS)
 
-<p align="center">
-  <img src="docs/nsgs_logo.png" alt="NSGS Logo" width="200" height="200"/>
-</p>
-
 *An Event-Driven Approach to Parallel Image Processing*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
