@@ -9,6 +9,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/Users/animesh/PCPPROJECT/Backend/src/main.cpp" "CMakeFiles/yolov8_ort.dir/src/main.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/main.cpp.o.d"
+  "/Users/animesh/PCPPROJECT/Backend/src/nsgs/GraphPartition.cpp" "CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o.d"
   "/Users/animesh/PCPPROJECT/Backend/src/nsgs/NeuronNode.cpp" "CMakeFiles/yolov8_ort.dir/src/nsgs/NeuronNode.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/nsgs/NeuronNode.cpp.o.d"
   "/Users/animesh/PCPPROJECT/Backend/src/nsgs/NsgsPredictor.cpp" "CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o.d"
   "/Users/animesh/PCPPROJECT/Backend/src/nsgs/SpikeQueue.cpp" "CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.o" "gcc" "CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.o.d"

@@ -8,6 +8,7 @@
 #include <opencv2/ximgproc.hpp> // For SLIC superpixels
 #include <future>
 #include <queue>
+#include <random>  // Add this at the top for std::random_device and std::mt19937
 
 NsgsPredictor::NsgsPredictor(const std::string &modelPath,
                              const bool &isGPU,
@@ -208,7 +209,7 @@ void NsgsPredictor::buildSegmentationGraph(const cv::Mat &image)
     // If we have mask protos from the YOLO segmentation model, use them as embeddings
     if (this->hasMask && outputTensors.size() > 1) {
         float *maskOutput = outputTensors[1].GetTensorMutableData<float>();
-        std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetDimensions();
+        std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
         
         // Reshape to usable format for OpenCV
         int protoChannels = maskShape[1];
@@ -446,94 +447,105 @@ void NsgsPredictor::buildSegmentationGraph(const cv::Mat &image)
                 size_t minSize = std::min(nodeFeatures.size(), neighborFeatures.size());
                 
                 float dotProduct = 0.0f;
-                float normNode = 0.0f, normNeighbor = 0.0f;
+                float normA = 0.0f;
+                float normB = 0.0f;
                 
-                for (size_t j = 0; j < minSize; j++) {
-                    dotProduct += nodeFeatures[j] * neighborFeatures[j];
-                    normNode += nodeFeatures[j] * nodeFeatures[j];
-                    normNeighbor += neighborFeatures[j] * neighborFeatures[j];
+                // Calculate dot product and norms
+                for (size_t k = 0; k < minSize; k++) {
+                    dotProduct += nodeFeatures[k] * neighborFeatures[k];
+                    normA += nodeFeatures[k] * nodeFeatures[k];
+                    normB += neighborFeatures[k] * neighborFeatures[k];
                 }
                 
-                // Compute cosine similarity
-                if (normNode > 0 && normNeighbor > 0) {
-                    cosineSimilarity = dotProduct / (std::sqrt(normNode) * std::sqrt(normNeighbor));
-                    // Ensure similarity is in [0,1] range
-                    cosineSimilarity = std::max(0.0f, cosineSimilarity);
+                // Calculate cosine similarity
+                if (normA > 0 && normB > 0) {
+                    cosineSimilarity = dotProduct / (std::sqrt(normA) * std::sqrt(normB));
                 }
                 
-                // 2. Calculate Euclidean distance for feature space differences
-                euclideanDistance = 0.0f;
-                for (size_t j = 0; j < minSize; j++) {
-                    float diff = nodeFeatures[j] - neighborFeatures[j];
-                    euclideanDistance += diff * diff;
+                // Calculate euclidean distance (then convert to similarity)
+                float euclideanDistanceSquared = 0.0f;
+                for (size_t k = 0; k < minSize; k++) {
+                    float diff = nodeFeatures[k] - neighborFeatures[k];
+                    euclideanDistanceSquared += diff * diff;
                 }
-                euclideanDistance = std::sqrt(euclideanDistance);
+                euclideanDistance = std::sqrt(euclideanDistanceSquared);
+                float euclideanSimilarity = 1.0f / (1.0f + euclideanDistance); // Convert distance to similarity
                 
-                // Normalize and convert to similarity (1.0 = identical, 0.0 = very different)
-                euclideanDistance = std::min(euclideanDistance, 10.0f); // Cap to avoid extreme values
-                float euclideanSimilarity = 1.0f - (euclideanDistance / 10.0f);
+                // 2. Calculate spatial distance similarity
+                float dx = static_cast<float>(nodePos.x - neighborPos.x);
+                float dy = static_cast<float>(nodePos.y - neighborPos.y);
+                spatialDistance = std::sqrt(dx*dx + dy*dy);
+                
+                // Convert to similarity measure (closer = more similar)
+                // Normalize based on image dimensions
+                float maxDistance = std::sqrt(static_cast<float>(width*width + height*height));
+                float spatialSimilarity = 1.0f - (spatialDistance / maxDistance);
                 
                 // 3. Calculate separate similarities for color and texture features
                 // Assuming the first 3 elements are color (Lab) and next 16 are texture (LBP)
                 if (minSize >= 19) { // Make sure we have both color and texture features
                     // Color similarity (first 3 features)
                     float colorDotProduct = 0.0f;
-                    float colorNormNode = 0.0f, colorNormNeighbor = 0.0f;
+                    float colorNormA = 0.0f, colorNormB = 0.0f;
                     
-                    for (size_t j = 0; j < 3; j++) {
-                        colorDotProduct += nodeFeatures[j] * neighborFeatures[j];
-                        colorNormNode += nodeFeatures[j] * nodeFeatures[j];
-                        colorNormNeighbor += neighborFeatures[j] * neighborFeatures[j];
+                    for (size_t k = 0; k < 3; k++) {
+                        colorDotProduct += nodeFeatures[k] * neighborFeatures[k];
+                        colorNormA += nodeFeatures[k] * nodeFeatures[k];
+                        colorNormB += neighborFeatures[k] * neighborFeatures[k];
                     }
                     
-                    if (colorNormNode > 0 && colorNormNeighbor > 0) {
-                        colorSimilarity = colorDotProduct / (std::sqrt(colorNormNode) * std::sqrt(colorNormNeighbor));
-                        colorSimilarity = std::max(0.0f, colorSimilarity);
+                    if (colorNormA > 0 && colorNormB > 0) {
+                        colorSimilarity = colorDotProduct / (std::sqrt(colorNormA) * std::sqrt(colorNormB));
                     }
                     
                     // Texture similarity (next 16 features)
                     float textureDotProduct = 0.0f;
-                    float textureNormNode = 0.0f, textureNormNeighbor = 0.0f;
+                    float textureNormA = 0.0f, textureNormB = 0.0f;
                     
-                    for (size_t j = 3; j < 19; j++) {
-                        textureDotProduct += nodeFeatures[j] * neighborFeatures[j];
-                        textureNormNode += nodeFeatures[j] * nodeFeatures[j];
-                        textureNormNeighbor += neighborFeatures[j] * neighborFeatures[j];
+                    for (size_t k = 3; k < 19; k++) {
+                        textureDotProduct += nodeFeatures[k] * neighborFeatures[k];
+                        textureNormA += nodeFeatures[k] * nodeFeatures[k];
+                        textureNormB += neighborFeatures[k] * neighborFeatures[k];
                     }
                     
-                    if (textureNormNode > 0 && textureNormNeighbor > 0) {
-                        textureSimilarity = textureDotProduct / (std::sqrt(textureNormNode) * std::sqrt(textureNormNeighbor));
-                        textureSimilarity = std::max(0.0f, textureSimilarity);
+                    if (textureNormA > 0 && textureNormB > 0) {
+                        textureSimilarity = textureDotProduct / (std::sqrt(textureNormA) * std::sqrt(textureNormB));
                     }
                 }
             }
             
-            // 4. Calculate spatial distance similarity
-            float dx = static_cast<float>(nodePos.x - neighborPos.x);
-            float dy = static_cast<float>(nodePos.y - neighborPos.y);
-            spatialDistance = std::sqrt(dx*dx + dy*dy);
-            
-            // Convert to similarity measure (closer = more similar)
-            // Normalize based on image dimensions
-            float maxDistance = std::sqrt(static_cast<float>(width*width + height*height));
-            float spatialSimilarity = 1.0f - (spatialDistance / maxDistance);
-            
-            // 5. Combine all similarity metrics with appropriate weights
+            // 4. Combine all similarity metrics with appropriate weights
             // Prioritize feature similarity but also consider spatial proximity
             float combinedSimilarity = 0.0f;
             
-            if (minSize >= 19) {
-                // If we have color and texture features, use a more detailed weighting
-                combinedSimilarity = 0.30f * cosineSimilarity +
-                                     0.20f * euclideanSimilarity +
-                                     0.25f * colorSimilarity +
-                                     0.15f * textureSimilarity +
-                                     0.10f * spatialSimilarity;
+            size_t minFeatureSize = std::min(nodeFeatures.size(), neighborFeatures.size());
+            
+            // Use all features with higher weight on color and texture
+            if (minFeatureSize >= 19) {
+                combinedSimilarity = 0.40f * cosineSimilarity +
+                                    0.30f * colorSimilarity +
+                                    0.20f * textureSimilarity;
             } else {
-                // Simpler weighting if we don't have detailed features
+                // Fallback to basic similarity if we don't have all features
                 combinedSimilarity = 0.70f * cosineSimilarity +
-                                     0.20f * euclideanSimilarity +
-                                     0.10f * spatialSimilarity;
+                                    0.30f * colorSimilarity;
+            }
+            
+            // Calculate and apply edge-based feature weights if we have gradient features
+            if (minFeatureSize > 19) { // Make sure we have gradient features
+                float edgeWeight = 0.0f;
+                
+                // Extract edge features (typically after the texture features)
+                for (size_t j = 19; j < std::min(size_t(27), minFeatureSize); j++) {
+                    edgeWeight += std::abs(nodeFeatures[j] - neighborFeatures[j]);
+                }
+                
+                // Normalize the edge weight
+                edgeWeight = std::min(1.0f, edgeWeight / 8.0f);
+                
+                // Adjust the similarity by edge strength
+                // Stronger edges -> lower similarity -> creates natural segmentation boundaries
+                combinedSimilarity *= (1.0f - 0.5f * edgeWeight);
             }
             
             // Ensure similarity is in [0,1] range
@@ -544,17 +556,17 @@ void NsgsPredictor::buildSegmentationGraph(const cv::Mat &image)
             // - This ensures all connections have minimum strength
             float connectionWeight = 0.2f + 0.8f * combinedSimilarity;
             
-            // 6. Apply NSGS-specific weight modulation based on edge features
+            // 5. Apply NSGS-specific weight modulation based on edge features
             // Weaken connections at strong image edges to help form segment boundaries
             float edgeStrength = 0.0f;
             cv::Point2i midpoint((nodePos.x + neighborPos.x) / 2, (nodePos.y + neighborPos.y) / 2);
             
             // Find edge strength features (gradient magnitudes) - assuming they're stored at specific index
-            if (minSize > 19) { // Make sure we have gradient features
+            if (minFeatureSize > 19) { // Make sure we have gradient features
                 // For this implementation, assume gradient features start at index 19
                 // Use the average of gradient features for edge strength
                 float nodeEdge = 0.0f, neighborEdge = 0.0f;
-                for (size_t j = 19; j < std::min(size_t(27), minSize); j++) {
+                for (size_t j = 19; j < std::min(size_t(27), minFeatureSize); j++) {
                     nodeEdge += nodeFeatures[j];
                     neighborEdge += neighborFeatures[j];
                 }
@@ -897,7 +909,7 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
     cv::Mat cnnActivations;
     if (this->hasMask && outputTensors.size() > 1) {
         float *maskOutput = outputTensors[1].GetTensorMutableData<float>();
-        std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetDimensions();
+        std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
         
         // Create activation magnitude map by summing across channels
         int protoChannels = maskShape[1];
@@ -1112,7 +1124,7 @@ void NsgsPredictor::runAsyncEventProcessing()
     
     // Get embeddings from the model's proto output (typically shape [1, proto_dim, H, W])
     float* maskOutput = outputTensors[1].GetTensorMutableData<float>();
-    std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetDimensions();
+    std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
     int protoChannels = maskShape[1]; // Number of proto/embedding channels
     int protoHeight = maskShape[2];
     int protoWidth = maskShape[3];
@@ -1172,7 +1184,7 @@ void NsgsPredictor::runAsyncEventProcessing()
             
             for (size_t j = 0; j < graphNodes.size(); j++) {
                 cv::Point2i nodePos = graphNodes[j]->getPosition();
-                float dist = cv::norm(nodePos - seedPositions[i]);
+                float dist = cv::norm(cv::Point2f(nodePos.x, nodePos.y) - seedPositions[i]);
                 
                 if (dist < minDist) {
                     minDist = dist;
@@ -1246,7 +1258,9 @@ void NsgsPredictor::runAsyncEventProcessing()
         
         // Randomly sample nodes if there are too many (for performance)
         if (graphNodes.size() > maxClusterNodes) {
-            std::random_shuffle(nodeIndices.begin(), nodeIndices.end());
+            std::random_device rd;
+            std::mt19937 g(rd());
+            std::shuffle(nodeIndices.begin(), nodeIndices.end(), g);
             nodeIndices.resize(maxClusterNodes);
         }
         
@@ -1345,7 +1359,10 @@ std::vector<Yolov8Result> NsgsPredictor::postprocessing(const cv::Size &resizedI
                                                       std::vector<Ort::Value> &outputTensors)
 {
     // Store the output tensors for use in NSGS processing
-    this->outputTensors = outputTensors;
+    this->outputTensors.clear();
+    for (auto& tensor : outputTensors) {
+        this->outputTensors.push_back(std::move(tensor));
+    }
     
     // Box outputs
     std::vector<cv::Rect> boxes;
@@ -1397,7 +1414,7 @@ std::vector<Yolov8Result> NsgsPredictor::postprocessing(const cv::Size &resizedI
     if (this->hasMask && outputTensors.size() > 1)
     {
         float *maskOutput = outputTensors[1].GetTensorMutableData<float>();
-        std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetDimensions();
+        std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
         std::vector<int> mask_protos_shape = {1, (int)maskShape[1], (int)maskShape[2], (int)maskShape[3]};
         mask_protos = cv::Mat(mask_protos_shape, CV_32F, maskOutput);
     }
@@ -1583,7 +1600,10 @@ std::vector<Yolov8Result> NsgsPredictor::predict(cv::Mat &image)
     // If using data parallelism, use partitioned processing
     if (numPartitions > 1 && !usePipeline) {
         // Store output tensors for use by partitions
-        this->outputTensors = outputTensors;
+        this->outputTensors.clear();
+        for (auto& tensor : outputTensors) {
+            this->outputTensors.push_back(std::move(tensor));
+        }
         
         // Build the graph
         buildSegmentationGraph(image);
@@ -1834,7 +1854,7 @@ void NsgsPredictor::startPipeline()
     // Define stage processing functions
     
     // 1. Preprocessing stage
-    preprocessStage->start([this, preprocessStage = preprocessStage.get()]() {
+    preprocessStage->start([this, preprocessStage = preprocessStage.get(), inferenceStage = inferenceStage.get()]() {
         std::unique_lock<std::mutex> lock(preprocessStage->stageMutex);
         if (preprocessStage->inputImages.empty()) return;
         
@@ -1863,7 +1883,7 @@ void NsgsPredictor::startPipeline()
     });
     
     // 2. Model inference stage
-    inferenceStage->start([this, inferenceStage = inferenceStage.get()]() {
+    inferenceStage->start([this, inferenceStage = inferenceStage.get(), graphStage = graphStage.get()]() {
         std::unique_lock<std::mutex> lock(inferenceStage->stageMutex);
         if (inferenceStage->preprocessedData.empty()) return;
         
@@ -1901,7 +1921,7 @@ void NsgsPredictor::startPipeline()
     });
     
     // 3. Graph construction stage
-    graphStage->start([this, graphStage = graphStage.get()]() {
+    graphStage->start([this, graphStage = graphStage.get(), spikeStage = spikeStage.get()]() {
         std::unique_lock<std::mutex> lock(graphStage->stageMutex);
         if (graphStage->modelOutputs.empty()) return;
         
@@ -1911,7 +1931,10 @@ void NsgsPredictor::startPipeline()
         lock.unlock();
         
         // Store the output tensors
-        this->outputTensors = outputTensors;
+        this->outputTensors.clear();
+        for (auto& tensor : outputTensors) {
+            this->outputTensors.push_back(std::move(tensor));
+        }
         
         // Create original RGB image for feature extraction and graph construction
         cv::Mat processedRgbImage = cv::Mat((int)this->inputShapes[0][2], (int)this->inputShapes[0][3], CV_8UC3);
@@ -1939,7 +1962,7 @@ void NsgsPredictor::startPipeline()
     });
     
     // 4. Spike propagation stage
-    spikeStage->start([this, spikeStage = spikeStage.get()]() {
+    spikeStage->start([this, spikeStage = spikeStage.get(), resultStage = resultStage.get()]() {
         // No lock needed since we don't use the queue for this stage
         
         if (numPartitions > 1) {
@@ -2129,7 +2152,7 @@ void NsgsPredictor::registerNodeEdgeStrengths(const cv::Mat &image)
     
     // Convert image to grayscale for edge detection
     cv::Mat grayImage;
-    cv::cvtColor(image, cv::COLOR_BGR2GRAY, grayImage);
+    cv::cvtColor(image, grayImage, cv::COLOR_BGR2GRAY);
     
     // Calculate image gradients using Scharr operator for better edge detection
     cv::Mat gradX, gradY, gradMag;

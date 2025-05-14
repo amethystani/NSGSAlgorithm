@@ -2,6 +2,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 
 GraphPartition::GraphPartition(int id, std::vector<std::shared_ptr<NeuronNode>>* globalNodes)
     : partitionId(id),
@@ -77,29 +78,31 @@ void GraphPartition::syncBoundaryNodes()
                             const std::vector<float>& remoteFeatures = remoteNode->getFeatures();
                             
                             if (!nodeFeatures.empty() && !remoteFeatures.empty()) {
-                                // Simple cosine similarity
-                                float dotProduct = 0.0f;
-                                float normNode = 0.0f, normRemote = 0.0f;
-                                
+                                // Calculate cosine similarity
                                 size_t minSize = std::min(nodeFeatures.size(), remoteFeatures.size());
+                                float dotProduct = 0.0f;
+                                float normA = 0.0f;
+                                float normB = 0.0f;
+                                
                                 for (size_t i = 0; i < minSize; i++) {
                                     dotProduct += nodeFeatures[i] * remoteFeatures[i];
-                                    normNode += nodeFeatures[i] * nodeFeatures[i];
-                                    normRemote += remoteFeatures[i] * remoteFeatures[i];
+                                    normA += nodeFeatures[i] * nodeFeatures[i];
+                                    normB += remoteFeatures[i] * remoteFeatures[i];
                                 }
                                 
-                                if (normNode > 0 && normRemote > 0) {
-                                    similarity = dotProduct / (std::sqrt(normNode) * std::sqrt(normRemote));
+                                normA = std::sqrt(normA);
+                                normB = std::sqrt(normB);
+                                
+                                if (normA > 0.0f && normB > 0.0f) {
+                                    similarity = dotProduct / (normA * normB);
                                 }
                             }
                             
-                            // Only propagate class if features are similar
-                            if (similarity > 0.8f) {
+                            // Only propagate to similar nodes
+                            if (similarity > 0.7f) {
+                                // Directly set the class ID and confidence
                                 remoteNode->setClassId(classId);
-                                remoteNode->setConfidence(confidence * 0.9f); // Slightly reduce confidence
-                                
-                                // Trigger spike propagation from this node
-                                remoteNode->incrementPotential(0.7f);
+                                remoteNode->setConfidence(confidence * 0.9f);
                             }
                         }
                     }
@@ -182,29 +185,16 @@ void GraphPartition::processPartition()
     auto lastBoundarySyncTime = std::chrono::steady_clock::now();
     
     while (active.load()) {
-        // Let the spike queue do its processing
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        // Sleep briefly to prevent busy waiting
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         
         // Periodically synchronize boundary nodes
         auto now = std::chrono::steady_clock::now();
-        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - lastBoundarySyncTime).count();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastBoundarySyncTime).count();
         
-        if (elapsedMs > 100) { // Sync every 100ms
+        if (elapsed > 100) { // Sync every 100ms
             syncBoundaryNodes();
             lastBoundarySyncTime = now;
-        }
-        
-        // Check if processing is done
-        if (localSpikeQueue->isEmpty() && localSpikeQueue->getTimeSinceLastActivity().count() > 200) {
-            // One final boundary sync before finishing
-            syncBoundaryNodes();
-            
-            // Check if we should continue
-            if (!active.load()) break;
-            
-            // Sleep longer since we're idle
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     }
 }

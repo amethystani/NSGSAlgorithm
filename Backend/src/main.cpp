@@ -67,13 +67,13 @@ int main(int argc, char *argv[])
         std::cout << "Using NSGS approach for processing" << std::endl;
         
         // Initialize NSGS predictor
-        NsgsPredictor predictor;
+        NsgsPredictor* predictor = nullptr;
         try
         {
-            predictor = NsgsPredictor(modelPath, isGPU,
-                                     confThreshold,
-                                     iouThreshold,
-                                     maskThreshold);
+            predictor = new NsgsPredictor(modelPath, isGPU,
+                                         confThreshold,
+                                         iouThreshold,
+                                         maskThreshold);
             std::cout << "NSGS Model was initialized." << std::endl;
         }
         catch (const std::exception &e)
@@ -82,7 +82,7 @@ int main(int argc, char *argv[])
             return -1;
         }
         
-        assert(classNames.size() == predictor.classNums);
+        assert(classNames.size() == predictor->classNums);
         std::regex pattern(".+\\.(jpg|jpeg|png|gif)$");
         std::cout << "Start predicting with NSGS..." << std::endl;
 
@@ -101,7 +101,7 @@ int main(int argc, char *argv[])
                 std::cout << Filename << " predicting with NSGS..." << std::endl;
 
                 cv::Mat image = cv::imread(Filename);
-                std::vector<Yolov8Result> result = predictor.predict(image);
+                std::vector<Yolov8Result> result = predictor->predict(image);
                 
                 utils::visualizeDetection(image, result, classNames);
 
@@ -114,6 +114,7 @@ int main(int argc, char *argv[])
         endTime = clock();
         std::cout << "The total run time is: " << (double)(endTime - startTime) / CLOCKS_PER_SEC << "seconds" << std::endl;
         std::cout << "The average run time is: " << (double)(endTime - startTime) / picNums / CLOCKS_PER_SEC << "seconds" << std::endl;
+        delete predictor;
     }
     else {
         // Use the original YOLOPredictor

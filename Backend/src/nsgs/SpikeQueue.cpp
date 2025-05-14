@@ -92,39 +92,39 @@ void SpikeQueue::addSpike(int sourceNodeId, int targetNodeId, float weight)
 
 Spike SpikeQueue::getNextSpike()
 {
-    // This method is kept for compatibility, but it's not used for work distribution anymore
-    
     std::unique_lock<std::mutex> lock(globalQueueMutex);
     
-    // Wait until there's a spike or we're terminated
-    globalQueueCondition.wait(lock, [this]{ 
-        return !globalQueue.empty() || terminated.load() || hasConverged.load(); 
+    // Wait for queue to have an item
+    globalQueueCondition.wait(lock, [this]() {
+        return !globalQueue.empty() || terminated.load();
     });
     
-    // If terminated or converged, return a dummy spike
-    if (terminated.load() || hasConverged.load()) {
-        return Spike(-1, -1, 0.0f);
+    if (terminated.load()) {
+        return Spike(); // Return empty spike if terminated
     }
     
-    // Get the next spike
-    Spike spike = globalQueue.front();
+    // Get the spike from the front of the queue
+    Spike spike = globalQueue.top();
     globalQueue.pop();
+    
+    totalQueuedSpikes.fetch_sub(1);
     
     return spike;
 }
 
 bool SpikeQueue::tryGetNextSpike(Spike& spike)
 {
-    // This method is kept for compatibility, but it's not used for work distribution anymore
+    std::unique_lock<std::mutex> lock(globalQueueMutex);
     
-    std::lock_guard<std::mutex> lock(globalQueueMutex);
-    
-    if (globalQueue.empty() || terminated.load() || hasConverged.load()) {
+    if (globalQueue.empty() || terminated.load()) {
         return false;
     }
     
-    spike = globalQueue.front();
+    spike = globalQueue.top();
     globalQueue.pop();
+    
+    totalQueuedSpikes.fetch_sub(1);
+    
     return true;
 }
 
@@ -169,39 +169,40 @@ bool SpikeQueue::stealWork(int threadId, Spike& spike)
 
 bool SpikeQueue::getGlobalWork(Spike& spike)
 {
-    // Try to get work from the global queue
     std::unique_lock<std::mutex> lock(globalQueueMutex);
     
-    if (globalQueue.empty()) {
-        return false;
-    }
-    
-    // Get a batch of work to reduce mutex contention
-    const int batchSize = 8;
-    int threadId = threadLocalId;
-    
-    if (threadId >= 0 && threadId < static_cast<int>(threadQueues.size())) {
-        int count = 0;
-        while (!globalQueue.empty() && count < batchSize) {
-            if (count == 0) {
-                // Return the first spike directly
-                spike = globalQueue.front();
-            } else {
-                // Push the rest to the local queue
-                threadQueues[threadId]->push(globalQueue.front());
+    // If global queue has items, distribute some to local queues for better parallelism
+    if (!globalQueue.empty()) {
+        // If there are more than 2 spikes per thread, distribute work
+        const size_t threshold = numThreads * 2;
+        
+        if (globalQueue.size() > threshold) {
+            for (size_t i = 0; i < numThreads; i++) {
+                if (!globalQueue.empty()) {
+                    spike = globalQueue.top();
+                    globalQueue.pop();
+                    
+                    // First, use one spike for this thread
+                    if (i == 0) {
+                        lock.unlock();
+                        return true;
+                    }
+                    
+                    // Distribute others to thread-local queues
+                    threadQueues[i]->push(globalQueue.top());
+                    globalQueue.pop();
+                    totalQueuedSpikes.fetch_sub(1);
+                }
             }
-            globalQueue.pop();
-            count++;
         }
         
-        if (count > 0) {
+        // Get one spike for this thread
+        if (!globalQueue.empty()) {
+            spike = globalQueue.top();
+            globalQueue.pop();
+            totalQueuedSpikes.fetch_sub(1);
             return true;
         }
-    } else {
-        // Fallback if thread ID is not valid
-        spike = globalQueue.front();
-        globalQueue.pop();
-        return true;
     }
     
     return false;
@@ -313,20 +314,27 @@ void SpikeQueue::stopProcessing()
 
 void SpikeQueue::clear()
 {
-    // Clear the global queue
+    std::unique_lock<std::mutex> lock(globalQueueMutex);
+    
+    // Clear global queue
+    std::priority_queue<Spike> empty;
+    globalQueue = std::priority_queue<Spike>(); // Create a new empty queue
+    
+    totalQueuedSpikes.store(0);
+    processedSpikeCount.store(0);
+    queueHighWatermark.store(0);
+    stateChangeCount.store(0);
+    
+    // Clear convergence history
     {
-        std::lock_guard<std::mutex> lock(globalQueueMutex);
-        std::queue<Spike> empty;
-        std::swap(globalQueue, empty);
+        std::lock_guard<std::mutex> historyLock(convergenceHistoryMutex);
+        convergenceHistory.clear();
     }
     
-    // Clear all thread queues
-    for (auto& queue : threadQueues) {
-        Spike dummy;
-        while (queue->pop(dummy)) {
-            // Just drain the queue
-        }
-    }
+    // Reset activity tracking
+    hasRecentActivity.store(false);
+    hasConverged.store(false);
+    lastActivityTime = std::chrono::steady_clock::now();
 }
 
 bool SpikeQueue::isEmpty() const

@@ -1,6 +1,8 @@
 file(REMOVE_RECURSE
   "CMakeFiles/yolov8_ort.dir/src/main.cpp.o"
   "CMakeFiles/yolov8_ort.dir/src/main.cpp.o.d"
+  "CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o"
+  "CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o.d"
   "CMakeFiles/yolov8_ort.dir/src/nsgs/NeuronNode.cpp.o"
   "CMakeFiles/yolov8_ort.dir/src/nsgs/NeuronNode.cpp.o.d"
   "CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o"

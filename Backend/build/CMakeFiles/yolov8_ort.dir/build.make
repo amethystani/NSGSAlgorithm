@@ -128,10 +128,24 @@ CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.s"
 	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/animesh/PCPPROJECT/Backend/src/nsgs/SpikeQueue.cpp -o CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.s
 
+CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o: CMakeFiles/yolov8_ort.dir/flags.make
+CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o: /Users/animesh/PCPPROJECT/Backend/src/nsgs/GraphPartition.cpp
+CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o: CMakeFiles/yolov8_ort.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o"
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o -MF CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o.d -o CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o -c /Users/animesh/PCPPROJECT/Backend/src/nsgs/GraphPartition.cpp
+
+CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.i"
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/animesh/PCPPROJECT/Backend/src/nsgs/GraphPartition.cpp > CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.i
+
+CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.s"
+	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/animesh/PCPPROJECT/Backend/src/nsgs/GraphPartition.cpp -o CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.s
+
 CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o: CMakeFiles/yolov8_ort.dir/flags.make
 CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o: /Users/animesh/PCPPROJECT/Backend/src/nsgs/NsgsPredictor.cpp
 CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o: CMakeFiles/yolov8_ort.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o"
 	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o -MF CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o.d -o CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o -c /Users/animesh/PCPPROJECT/Backend/src/nsgs/NsgsPredictor.cpp
 
 CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.i: cmake_force
@@ -145,7 +159,7 @@ CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.s: cmake_force
 CMakeFiles/yolov8_ort.dir/src/main.cpp.o: CMakeFiles/yolov8_ort.dir/flags.make
 CMakeFiles/yolov8_ort.dir/src/main.cpp.o: /Users/animesh/PCPPROJECT/Backend/src/main.cpp
 CMakeFiles/yolov8_ort.dir/src/main.cpp.o: CMakeFiles/yolov8_ort.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/yolov8_ort.dir/src/main.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/yolov8_ort.dir/src/main.cpp.o"
 	/Library/Developer/CommandLineTools/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/yolov8_ort.dir/src/main.cpp.o -MF CMakeFiles/yolov8_ort.dir/src/main.cpp.o.d -o CMakeFiles/yolov8_ort.dir/src/main.cpp.o -c /Users/animesh/PCPPROJECT/Backend/src/main.cpp
 
 CMakeFiles/yolov8_ort.dir/src/main.cpp.i: cmake_force
@@ -162,6 +176,7 @@ yolov8_ort_OBJECTS = \
 "CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o" \
 "CMakeFiles/yolov8_ort.dir/src/nsgs/NeuronNode.cpp.o" \
 "CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.o" \
+"CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o" \
 "CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o" \
 "CMakeFiles/yolov8_ort.dir/src/main.cpp.o"
 
@@ -172,6 +187,7 @@ yolov8_ort: CMakeFiles/yolov8_ort.dir/src/utils.cpp.o
 yolov8_ort: CMakeFiles/yolov8_ort.dir/src/yolov8Predictor.cpp.o
 yolov8_ort: CMakeFiles/yolov8_ort.dir/src/nsgs/NeuronNode.cpp.o
 yolov8_ort: CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.o
+yolov8_ort: CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o
 yolov8_ort: CMakeFiles/yolov8_ort.dir/src/nsgs/NsgsPredictor.cpp.o
 yolov8_ort: CMakeFiles/yolov8_ort.dir/src/main.cpp.o
 yolov8_ort: CMakeFiles/yolov8_ort.dir/build.make
@@ -233,7 +249,7 @@ yolov8_ort: /opt/homebrew/lib/libopencv_photo.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_imgproc.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_core.4.11.0.dylib
 yolov8_ort: CMakeFiles/yolov8_ort.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX executable yolov8_ort"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/animesh/PCPPROJECT/Backend/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Linking CXX executable yolov8_ort"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/yolov8_ort.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

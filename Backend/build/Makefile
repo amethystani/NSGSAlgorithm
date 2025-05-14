@@ -153,6 +153,30 @@ src/main.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/main.cpp.s
 .PHONY : src/main.cpp.s
 
+src/nsgs/GraphPartition.o: src/nsgs/GraphPartition.cpp.o
+.PHONY : src/nsgs/GraphPartition.o
+
+# target to build an object file
+src/nsgs/GraphPartition.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.o
+.PHONY : src/nsgs/GraphPartition.cpp.o
+
+src/nsgs/GraphPartition.i: src/nsgs/GraphPartition.cpp.i
+.PHONY : src/nsgs/GraphPartition.i
+
+# target to preprocess a source file
+src/nsgs/GraphPartition.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.i
+.PHONY : src/nsgs/GraphPartition.cpp.i
+
+src/nsgs/GraphPartition.s: src/nsgs/GraphPartition.cpp.s
+.PHONY : src/nsgs/GraphPartition.s
+
+# target to generate assembly for a file
+src/nsgs/GraphPartition.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/GraphPartition.cpp.s
+.PHONY : src/nsgs/GraphPartition.cpp.s
+
 src/nsgs/NeuronNode.o: src/nsgs/NeuronNode.cpp.o
 .PHONY : src/nsgs/NeuronNode.o
 
@@ -285,6 +309,9 @@ help:
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"
+	@echo "... src/nsgs/GraphPartition.o"
+	@echo "... src/nsgs/GraphPartition.i"
+	@echo "... src/nsgs/GraphPartition.s"
 	@echo "... src/nsgs/NeuronNode.o"
 	@echo "... src/nsgs/NeuronNode.i"
 	@echo "... src/nsgs/NeuronNode.s"
