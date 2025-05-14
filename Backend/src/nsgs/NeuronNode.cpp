@@ -2,6 +2,7 @@
 #include "SpikeQueue.h"
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 NeuronNode::NeuronNode(int id, cv::Point2i position, std::weak_ptr<SpikeQueue> queue)
     : id(id), 
@@ -78,19 +79,92 @@ bool NeuronNode::checkAndFire()
     
     if (currentPotential > effectiveThreshold)
     {
-        // Generate a spike
-        hasSpike = true;
+        // NSGS Enhancement: Check neighborhood class consistency before firing
+        // This helps form clearer boundaries between segments
+        bool shouldFire = true;
+        int dominantClassId = -1;
+        float maxClassConfidence = 0.0f;
         
-        // Reset potential
-        statePotential.store(0.0f);
+        // Only perform consistency check if this node has a class
+        if (classId >= 0) {
+            // Count active neighbors by class
+            std::unordered_map<int, int> neighborClassCounts;
+            std::unordered_map<int, float> neighborClassConfidences;
+            int activeNeighbors = 0;
+            
+            for (size_t i = 0; i < connections.size(); i++) {
+                if (auto neighbor = connections[i].lock()) {
+                    int neighborClass = neighbor->getClassId();
+                    if (neighborClass >= 0) {
+                        neighborClassCounts[neighborClass]++;
+                        neighborClassConfidences[neighborClass] += neighbor->getConfidence();
+                        activeNeighbors++;
+                    }
+                }
+            }
+            
+            // Find dominant class among neighbors
+            for (const auto& pair : neighborClassCounts) {
+                float avgConfidence = neighborClassConfidences[pair.first] / pair.second;
+                if (pair.second > neighborClassCounts[dominantClassId] || 
+                    (pair.second == neighborClassCounts[dominantClassId] && 
+                     avgConfidence > maxClassConfidence)) {
+                    dominantClassId = pair.first;
+                    maxClassConfidence = avgConfidence;
+                }
+            }
+            
+            // If this node's class differs from dominant neighbor class and 
+            // the dominant class has strong representation, inhibit firing
+            // This prevents crossing established segment boundaries
+            if (activeNeighbors > 3 && // At least 3 classified neighbors
+                dominantClassId >= 0 && dominantClassId != classId && 
+                neighborClassCounts[dominantClassId] > activeNeighbors/2) {
+                
+                // Instead of firing, adapt class to match neighborhood if confidence is low
+                // This helps clean up noisy classifications
+                if (confidence < 0.6f && maxClassConfidence > 0.7f) {
+                    classId = dominantClassId;
+                    confidence = 0.8f * maxClassConfidence; // Slightly reduce confidence for propagated classes
+                    
+                    // Reduce potential to prevent immediate firing with new class
+                    statePotential.store(0.5f * effectiveThreshold);
+                    return false;
+                }
+                
+                // High confidence nodes resist class changes and don't fire across boundaries
+                if (confidence > 0.7f) {
+                    shouldFire = false;
+                    // Strong class identity enhances refractory period
+                    refractoryPeriod.store(8);
+                    // And reduces potential
+                    statePotential.store(0.25f * effectiveThreshold);
+                    return false;
+                }
+            }
+        }
         
-        // Enter refractory period (5 cycles as an example)
-        refractoryPeriod.store(5);
-        
-        // Propagate spike to neighbors
-        propagateToNeighbors();
-        
-        return true;
+        if (shouldFire) {
+            // Generate a spike
+            hasSpike = true;
+            
+            // Reset potential
+            statePotential.store(0.0f);
+            
+            // Enter refractory period - higher for nodes with assigned classes
+            int baseRefractoryPeriod = 5;
+            if (classId >= 0) {
+                // Classified nodes have longer refractory periods proportional to confidence
+                refractoryPeriod.store(baseRefractoryPeriod + static_cast<int>(5.0f * confidence));
+            } else {
+                refractoryPeriod.store(baseRefractoryPeriod);
+            }
+            
+            // Propagate spike to neighbors
+            propagateToNeighbors();
+            
+            return true;
+        }
     }
     
     return false;
@@ -107,7 +181,8 @@ void NeuronNode::propagateToNeighbors()
     {
         if (auto neighbor = connections[i].lock())
         {
-            // Add spike to the queue
+            // Add spike to the queue (priority calculation happens in SpikeQueue now)
+            // The SpikeQueue will automatically prioritize spikes near edges
             queue->addSpike(id, neighbor->getId(), connectionWeights[i]);
         }
     }
@@ -117,6 +192,42 @@ void NeuronNode::receiveSpike(float weight)
 {
     // When receiving a spike, increase potential based on the connection weight
     incrementPotential(weight * 0.5f); // Scale factor to control influence
+    
+    // NSGS Core: Update class ID based on spikes received
+    // If this node has no class yet and the spike is strong enough,
+    // check if the source node has a class assigned
+    if (classId < 0 && statePotential.load() > threshold * 0.7f) {
+        // Try to find the source node in our connections to get its class
+        for (size_t i = 0; i < connections.size(); i++) {
+            if (auto neighbor = connections[i].lock()) {
+                int neighborClassId = neighbor->getClassId();
+                if (neighborClassId >= 0) {
+                    // Calculate how strongly this node should adopt the neighbor's class
+                    // Based on feature similarity and connection strength
+                    float similarityScore = 1.0f;
+                    const std::vector<float>& myFeatures = getFeatures();
+                    const std::vector<float>& neighborFeatures = neighbor->getFeatures();
+                    if (!myFeatures.empty() && !neighborFeatures.empty()) {
+                        // Simple feature similarity calculation (dot product)
+                        float dotProduct = 0.0f;
+                        size_t featureSize = std::min(myFeatures.size(), neighborFeatures.size());
+                        for (size_t j = 0; j < featureSize; j++) {
+                            dotProduct += myFeatures[j] * neighborFeatures[j];
+                        }
+                        similarityScore = std::max(0.0f, dotProduct / featureSize);
+                    }
+                    
+                    // Class propagation happens when similarity is high and potential is sufficient
+                    float propagationStrength = similarityScore * (statePotential.load() / threshold);
+                    if (propagationStrength > 0.8f) {
+                        classId = neighborClassId;
+                        confidence = propagationStrength * neighbor->getConfidence();
+                        break;
+                    }
+                }
+            }
+        }
+    }
     
     // Check if this causes the node to fire
     checkAndFire();

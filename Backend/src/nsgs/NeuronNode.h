@@ -62,6 +62,7 @@ public:
     float getThreshold() const { return threshold * adaptiveThresholdModifier; }
     int getClassId() const { return classId; }
     float getConfidence() const { return confidence; }
+    const std::vector<float>& getFeatures() const { return features; }
     
     void setClassId(int id) { classId = id; }
     void setConfidence(float conf) { confidence = conf; }
