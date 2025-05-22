@@ -1,33 +1,37 @@
 #include "NsgsPredictor.h"
 #include <iostream>
-#include <algorithm>
-#include <cmath>
-#include <chrono>
+#include <thread>
+#include <stdexcept>
 
 GraphPartition::GraphPartition(int id, std::vector<std::shared_ptr<NeuronNode>>* globalNodes)
-    : partitionId(id),
-      active(false),
-      globalNodesRef(globalNodes)
+    : partitionId(id), globalNodesRef(globalNodes), active(false)
 {
-    // Create a local spike queue for this partition
-    int numThreads = std::max(1, static_cast<int>(std::thread::hardware_concurrency()) / 4);
-    localSpikeQueue = std::make_shared<SpikeQueue>(numThreads);
+    // Create local spike queue
+    localSpikeQueue = std::make_shared<SpikeQueue>();
     
-    std::cout << "NSGS: Created graph partition " << id 
-              << " with " << numThreads << " processing threads" << std::endl;
+    std::cout << "Created graph partition " << id << std::endl;
 }
 
 GraphPartition::~GraphPartition()
 {
+    // Make sure processing is stopped before destruction
     stop();
+    
+    std::cout << "Destroyed graph partition " << partitionId << std::endl;
 }
 
 void GraphPartition::addNode(std::shared_ptr<NeuronNode> node, bool isBoundary)
 {
-    // Add node to this partition
+    // Safety check for null node pointer
+    if (!node) {
+        std::cerr << "GraphPartition: Cannot add null node" << std::endl;
+        return;
+    }
+    
+    // Add the node to this partition
     nodes.push_back(node);
     
-    // If this is a boundary node, record its index
+    // Mark as boundary node if specified
     if (isBoundary) {
         boundaryNodeIndices.push_back(nodes.size() - 1);
     }
@@ -35,77 +39,81 @@ void GraphPartition::addNode(std::shared_ptr<NeuronNode> node, bool isBoundary)
 
 void GraphPartition::addExternalConnection(int localNodeIndex, int remoteNodeGlobalIndex)
 {
-    if (localNodeIndex >= 0 && localNodeIndex < static_cast<int>(nodes.size())) {
-        externalConnections.push_back(std::make_pair(localNodeIndex, remoteNodeGlobalIndex));
+    // Safety checks for valid indices
+    if (localNodeIndex < 0 || localNodeIndex >= static_cast<int>(nodes.size())) {
+        std::cerr << "GraphPartition: Invalid local node index: " << localNodeIndex << std::endl;
+        return;
     }
+    
+    if (!globalNodesRef) {
+        std::cerr << "GraphPartition: No global nodes reference available" << std::endl;
+        return;
+    }
+    
+    if (remoteNodeGlobalIndex < 0 || remoteNodeGlobalIndex >= static_cast<int>(globalNodesRef->size())) {
+        std::cerr << "GraphPartition: Invalid remote node index: " << remoteNodeGlobalIndex << std::endl;
+        return;
+    }
+    
+    // Add external connection
+    externalConnections.emplace_back(localNodeIndex, remoteNodeGlobalIndex);
 }
 
 void GraphPartition::syncBoundaryNodes()
 {
+    // Thread-safe protection for boundary nodes
     std::lock_guard<std::mutex> lock(boundaryMutex);
     
-    // Skip if there are no global nodes reference
-    if (!globalNodesRef) return;
+    if (!globalNodesRef) {
+        std::cerr << "GraphPartition: No global nodes reference available for sync" << std::endl;
+        return;
+    }
     
-    // For each boundary node, synchronize with its external connections
-    for (int localIdx : boundaryNodeIndices) {
-        if (localIdx < 0 || localIdx >= static_cast<int>(nodes.size())) continue;
+    // Process each boundary node
+    for (int index : boundaryNodeIndices) {
+        // Safety check
+        if (index < 0 || index >= static_cast<int>(nodes.size())) {
+            continue;
+        }
         
-        auto& node = nodes[localIdx];
+        auto& node = nodes[index];
+        if (!node) continue;
+        
+        // Get current node state
         int classId = node->getClassId();
         float confidence = node->getConfidence();
+        float potential = node->getPotential();
         
-        // Only propagate high-confidence classifications across partition boundaries
-        if (classId >= 0 && confidence > 0.7f) {
-            // Find all external connections for this node
-            for (const auto& conn : externalConnections) {
-                if (conn.first == localIdx) {
-                    int remoteIdx = conn.second;
+        // Use ID from node to find the global node
+        int nodeId = node->getId();
+        if (nodeId >= 0 && nodeId < static_cast<int>(globalNodesRef->size()) && (*globalNodesRef)[nodeId]) {
+            // Copy state to global node if it has higher confidence
+            auto& globalNode = (*globalNodesRef)[nodeId];
+            
+            // Only propagate state if this has valid classification with good confidence
+            if (classId >= 0 && confidence > 0.4f) {
+                if (classId != globalNode->getClassId() || confidence > globalNode->getConfidence()) {
+                    globalNode->setClassId(classId);
+                    globalNode->setConfidence(confidence);
                     
-                    // Check if the remote index is valid
-                    if (remoteIdx >= 0 && remoteIdx < static_cast<int>(globalNodesRef->size())) {
-                        auto& remoteNode = (*globalNodesRef)[remoteIdx];
-                        
-                        // If remote node has no class or lower confidence, propagate our class
-                        int remoteClassId = remoteNode->getClassId();
-                        float remoteConfidence = remoteNode->getConfidence();
-                        
-                        if (remoteClassId < 0 || remoteConfidence < confidence) {
-                            // Calculate feature similarity to determine if we should propagate
-                            float similarity = 0.0f;
-                            
-                            const std::vector<float>& nodeFeatures = node->getFeatures();
-                            const std::vector<float>& remoteFeatures = remoteNode->getFeatures();
-                            
-                            if (!nodeFeatures.empty() && !remoteFeatures.empty()) {
-                                // Calculate cosine similarity
-                                size_t minSize = std::min(nodeFeatures.size(), remoteFeatures.size());
-                                float dotProduct = 0.0f;
-                                float normA = 0.0f;
-                                float normB = 0.0f;
-                                
-                                for (size_t i = 0; i < minSize; i++) {
-                                    dotProduct += nodeFeatures[i] * remoteFeatures[i];
-                                    normA += nodeFeatures[i] * nodeFeatures[i];
-                                    normB += remoteFeatures[i] * remoteFeatures[i];
-                                }
-                                
-                                normA = std::sqrt(normA);
-                                normB = std::sqrt(normB);
-                                
-                                if (normA > 0.0f && normB > 0.0f) {
-                                    similarity = dotProduct / (normA * normB);
-                                }
-                            }
-                            
-                            // Only propagate to similar nodes
-                            if (similarity > 0.7f) {
-                                // Directly set the class ID and confidence
-                                remoteNode->setClassId(classId);
-                                remoteNode->setConfidence(confidence * 0.9f);
-                            }
-                        }
+                    // Also share potential (take max of current and new)
+                    float globalPotential = globalNode->getPotential();
+                    if (potential > globalPotential) {
+                        globalNode->incrementPotential(potential - globalPotential);
                     }
+                }
+            }
+            
+            // Copy from global to local if needed
+            if (globalNode->getClassId() >= 0 && 
+                (classId < 0 || globalNode->getConfidence() > node->getConfidence())) {
+                node->setClassId(globalNode->getClassId());
+                node->setConfidence(globalNode->getConfidence());
+                
+                // Also share potential (take max of current and new)
+                float globalPotential = globalNode->getPotential();
+                if (globalPotential > potential) {
+                    node->incrementPotential(globalPotential - potential);
                 }
             }
         }
@@ -114,87 +122,103 @@ void GraphPartition::syncBoundaryNodes()
 
 void GraphPartition::start()
 {
-    if (active.load()) return;
+    // Don't start if already active
+    if (active.load()) {
+        return;
+    }
     
+    // Activate partition
     active.store(true);
     
-    // Start the local spike queue
-    localSpikeQueue->startProcessing(&nodes);
-    
-    // Start the processing thread
+    // Start processing thread
     processingThread = std::thread(&GraphPartition::processPartition, this);
-    
-    std::cout << "NSGS: Started partition " << partitionId 
-              << " with " << nodes.size() << " nodes ("
-              << boundaryNodeIndices.size() << " boundary nodes)" << std::endl;
 }
 
-void GraphPartition::stop()
-{
+void GraphPartition::stop() {
+    // Mark partition as inactive
     active.store(false);
     
-    // Stop the local spike queue
-    localSpikeQueue->stopProcessing();
-    
-    // Wait for processing thread to finish
+    // Wait for thread to complete
     if (processingThread.joinable()) {
         processingThread.join();
     }
-    
-    std::cout << "NSGS: Stopped partition " << partitionId << std::endl;
 }
 
 void GraphPartition::processPartition()
 {
-    // Initial seeding for this partition - find high-contrast nodes
-    std::vector<std::pair<int, float>> nodeScores;
+    // Safety check
+    if (!localSpikeQueue || nodes.empty() || !globalNodesRef) {
+        active.store(false);
+        return;
+    }
     
-    for (size_t i = 0; i < nodes.size(); i++) {
-        auto& node = nodes[i];
-        const std::vector<float>& features = node->getFeatures();
+    try {
+        localSpikeQueue->startProcessing(&nodes);
         
-        float score = 0.0f;
-        
-        // Use gradient features for contrast detection
-        if (features.size() > 19) {
-            // Assuming gradient features are at indices 19-26
-            for (size_t j = 19; j < std::min(size_t(27), features.size()); j++) {
-                score += features[j];
+        // Initial activation - seed random nodes to start activity
+        int numInitialSpikes = std::min(5, static_cast<int>(nodes.size() / 10));
+        if (numInitialSpikes > 0 && !nodes.empty()) {
+            for (int i = 0; i < numInitialSpikes; i++) {
+                int randomIndex = rand() % nodes.size();
+                nodes[randomIndex]->incrementPotential(0.6f);
+                nodes[randomIndex]->checkAndFire();
             }
-            score /= 8.0f; // Normalize
         }
         
-        nodeScores.push_back(std::make_pair(i, score));
-    }
-    
-    // Sort nodes by score
-    std::sort(nodeScores.begin(), nodeScores.end(), 
-              [](const std::pair<int, float>& a, const std::pair<int, float>& b) {
-                  return a.second > b.second;
-              });
-    
-    // Seed the top N nodes
-    int numInitialSpikes = std::max(5, static_cast<int>(nodes.size() / 50));
-    for (int i = 0; i < std::min(numInitialSpikes, static_cast<int>(nodeScores.size())); i++) {
-        int nodeIdx = nodeScores[i].first;
-        nodes[nodeIdx]->incrementPotential(0.7f);
-        nodes[nodeIdx]->checkAndFire();
-    }
-    
-    // Process until stopped
-    auto lastBoundarySyncTime = std::chrono::steady_clock::now();
-    
-    while (active.load()) {
-        // Sleep briefly to prevent busy waiting
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // Main processing loop
+        int iteration = 0;
+        const int maxIterations = 100;  // Limit to prevent infinite loops
         
-        // Periodically synchronize boundary nodes
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastBoundarySyncTime).count();
-        
-        if (elapsed > 100) { // Sync every 100ms
-            syncBoundaryNodes();
-            lastBoundarySyncTime = now;
+        while (active.load() && iteration < maxIterations) {
+            // Process each node
+            for (auto& node : nodes) {
+                if (!node) continue;
+                
+                // Check if node should fire based on current potential
+                node->checkAndFire();
+            }
+            
+            // Process external connections
+            for (const auto& conn : externalConnections) {
+                // Safety check for valid indices
+                if (conn.first >= 0 && conn.first < static_cast<int>(nodes.size()) &&
+                    conn.second >= 0 && conn.second < static_cast<int>(globalNodesRef->size())) {
+                    
+                    auto& localNode = nodes[conn.first];
+                    auto& remoteNode = (*globalNodesRef)[conn.second];
+                    
+                    // Skip invalid nodes
+                    if (!localNode || !remoteNode) continue;
+                    
+                    // If local node has class ID, propagate to remote node
+                    int localClassId = localNode->getClassId();
+                    if (localClassId >= 0) {
+                        float confidence = localNode->getConfidence();
+                        remoteNode->receiveSpike(0.3f, localClassId, confidence * 0.8f);
+                    }
+                }
+            }
+            
+            // Synchronize with other partitions periodically
+            if (iteration % 10 == 0) {
+                syncBoundaryNodes();
+            }
+            
+            // Sleep briefly to prevent excessive CPU usage
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            
+            iteration++;
         }
+        
+        // Final sync before stopping
+        syncBoundaryNodes();
+        
+        // Stop local spike queue
+        localSpikeQueue->stopProcessing();
+        
+    } catch (const std::exception& e) {
+        std::cerr << "GraphPartition " << partitionId << " exception: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "GraphPartition " << partitionId << " unknown exception" << std::endl;
     }
 }

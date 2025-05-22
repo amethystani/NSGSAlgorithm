@@ -150,6 +150,16 @@ struct ConvergenceData {
           timestamp(std::chrono::steady_clock::now()) {}
 };
 
+// Define a hash function for std::pair<int, int>
+namespace std {
+    template<>
+    struct hash<std::pair<int, int>> {
+        size_t operator()(const std::pair<int, int>& p) const {
+            return hash<int>()(p.first) ^ hash<int>()(p.second);
+        }
+    };
+}
+
 // Thread-safe queue for handling spikes in the NSGS model
 class SpikeQueue {
 private:
@@ -178,8 +188,9 @@ private:
     // Reference to all nodes (for spike propagation)
     std::vector<std::shared_ptr<NeuronNode>>* nodesRef;
     
-    // Edge strength map for priority calculation
+    // Edge strength maps for priority calculation
     std::unordered_map<int, float> nodeEdgeStrengths;
+    std::unordered_map<std::pair<int, int>, float> edgeStrengths;
     std::mutex edgeStrengthMutex;
     
     // Callback for thermal adaptation
@@ -263,17 +274,15 @@ public:
     int getActiveWorkers() const { return activeWorkers.load(); }
     int getThreadCount() const { return numThreads; }
     
-    // Records a state change in a node (e.g., class assignment)
+    // Activity tracking
     void recordStateChange();
-    
-    // Get convergence statistics
     float getConvergenceRate() const;
     std::chrono::milliseconds getTimeSinceLastActivity() const;
     
-    // Wait for system to converge or timeout
+    // Convergence waiting
     bool waitForConvergence(int maxWaitTimeMs);
     
-    // Thermal feedback
+    // Thermal adaptivity
     void setThermalFeedbackCallback(std::function<void(float)> callback);
     void checkThermalAdaptation();
 }; 

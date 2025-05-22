@@ -146,6 +146,14 @@ void NsgsPredictor::getBestClassInfo(std::vector<float>::iterator it,
 cv::Mat NsgsPredictor::getMask(const cv::Mat &maskProposals,
                               const cv::Mat &maskProtos)
 {
+    // Safety check for valid inputs
+    if (maskProposals.empty() || maskProtos.empty() || 
+        this->outputShapes.size() < 2 || 
+        this->outputShapes[1].size() < 4) {
+        std::cerr << "NSGS: Invalid mask inputs or shapes" << std::endl;
+        return cv::Mat();
+    }
+
     cv::Mat protos = maskProtos.reshape(0, {(int)this->outputShapes[1][1], (int)this->outputShapes[1][2] * (int)this->outputShapes[1][3]});
 
     cv::Mat matmul_res = (maskProposals * protos).t();
@@ -203,13 +211,29 @@ void NsgsPredictor::buildSegmentationGraph(const cv::Mat &image)
     // Clear any existing nodes
     graphNodes.clear();
     
+    // Safety check for valid inputs
+    if (image.empty()) {
+        std::cerr << "NSGS: Empty image provided to buildSegmentationGraph" << std::endl;
+        return;
+    }
+    
     // Get embeddings from model output for feature extraction
     cv::Mat embeddings;
     
     // If we have mask protos from the YOLO segmentation model, use them as embeddings
     if (this->hasMask && outputTensors.size() > 1) {
         float *maskOutput = outputTensors[1].GetTensorMutableData<float>();
+        if (!maskOutput) {
+            std::cerr << "NSGS: Invalid mask output data" << std::endl;
+            return;
+        }
         std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
+        
+        // Ensure valid dimensions
+        if (maskShape.size() < 4) {
+            std::cerr << "NSGS: Invalid mask shape dimensions" << std::endl;
+            return;
+        }
         
         // Reshape to usable format for OpenCV
         int protoChannels = maskShape[1];
@@ -632,7 +656,7 @@ void NsgsPredictor::initializeNodePotentials(const cv::Mat &embeddings)
         if (embX > 0 && embX < embeddingWidth - 1 && embY > 0 && embY < embeddingHeight - 1) {
             // Calculate gradient using multiple channels for robustness
             for (int c = 0; c < std::min(3, embeddingChannels); c++) {
-                float right, left, down, up;
+                float right = 0, left = 0, down = 0, up = 0;
                 
                 if (embeddingChannels == 1) {
                     right = embeddings.at<float>(embY, embX + 1);
@@ -640,10 +664,24 @@ void NsgsPredictor::initializeNodePotentials(const cv::Mat &embeddings)
                     down = embeddings.at<float>(embY + 1, embX);
                     up = embeddings.at<float>(embY - 1, embX);
                 } else {
-                    right = embeddings.at<cv::Vec<float, 32>>(embY, embX + 1)[c];
-                    left = embeddings.at<cv::Vec<float, 32>>(embY, embX - 1)[c];
-                    down = embeddings.at<cv::Vec<float, 32>>(embY + 1, embX)[c];
-                    up = embeddings.at<cv::Vec<float, 32>>(embY - 1, embX)[c];
+                    // Fix: Safe multi-channel access with proper checks for channel count
+                    float* pixelPtr;
+                    
+                    // Right pixel
+                    pixelPtr = (float*)(embeddings.data + embY*embeddings.step + (embX+1)*embeddings.elemSize());
+                    right = pixelPtr[c];
+                    
+                    // Left pixel
+                    pixelPtr = (float*)(embeddings.data + embY*embeddings.step + (embX-1)*embeddings.elemSize());
+                    left = pixelPtr[c];
+                    
+                    // Down pixel
+                    pixelPtr = (float*)(embeddings.data + (embY+1)*embeddings.step + embX*embeddings.elemSize());
+                    down = pixelPtr[c];
+                    
+                    // Up pixel
+                    pixelPtr = (float*)(embeddings.data + (embY-1)*embeddings.step + embX*embeddings.elemSize());
+                    up = pixelPtr[c];
                 }
                 
                 gradX += (right - left) / 2.0f;
@@ -899,6 +937,13 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
     
     // First, collect node characteristics for informed selection
     std::vector<std::pair<size_t, float>> nodeScores;
+    
+    // Safety check
+    if (graphNodes.empty()) {
+        std::cerr << "NSGS: No nodes available for spike propagation" << std::endl;
+        return;
+    }
+    
     nodeScores.reserve(graphNodes.size());
     
     // Get image dimensions for normalization
@@ -909,37 +954,46 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
     cv::Mat cnnActivations;
     if (this->hasMask && outputTensors.size() > 1) {
         float *maskOutput = outputTensors[1].GetTensorMutableData<float>();
-        std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
-        
-        // Create activation magnitude map by summing across channels
-        int protoChannels = maskShape[1];
-        int protoHeight = maskShape[2];
-        int protoWidth = maskShape[3];
-        
-        // Calculate activation magnitude (L2 norm across channels)
-        cv::Mat embeddings(protoHeight, protoWidth, CV_32FC(protoChannels), maskOutput);
-        cnnActivations = cv::Mat(protoHeight, protoWidth, CV_32F, 0.0f);
-        
-        for (int y = 0; y < protoHeight; y++) {
-            for (int x = 0; x < protoWidth; x++) {
-                float sum = 0.0f;
-                for (int c = 0; c < std::min(protoChannels, 32); c++) {
-                    float val = embeddings.at<cv::Vec<float, 32>>(y, x)[c];
-                    sum += val * val;
+        if (!maskOutput) {
+            std::cerr << "NSGS: Invalid mask output tensor data" << std::endl;
+        } else {
+            std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
+            
+            // Proper bounds checking
+            if (maskShape.size() >= 4) {
+                // Create activation magnitude map by summing across channels
+                int protoChannels = maskShape[1];
+                int protoHeight = maskShape[2];
+                int protoWidth = maskShape[3];
+                
+                // Calculate activation magnitude (L2 norm across channels)
+                cv::Mat embeddings(protoHeight, protoWidth, CV_32FC(protoChannels), maskOutput);
+                cnnActivations = cv::Mat(protoHeight, protoWidth, CV_32F, 0.0f);
+                
+                for (int y = 0; y < protoHeight; y++) {
+                    for (int x = 0; x < protoWidth; x++) {
+                        float sum = 0.0f;
+                        // Safe access using direct pointer arithmetic
+                        float* pixelPtr = (float*)(embeddings.data + y*embeddings.step + x*embeddings.elemSize());
+                        for (int c = 0; c < std::min(protoChannels, 32); c++) {
+                            float val = pixelPtr[c];
+                            sum += val * val;
+                        }
+                        cnnActivations.at<float>(y, x) = std::sqrt(sum);
+                    }
                 }
-                cnnActivations.at<float>(y, x) = std::sqrt(sum);
+                
+                // Normalize activations to [0,1] range
+                double minVal, maxVal;
+                cv::minMaxLoc(cnnActivations, &minVal, &maxVal);
+                if (maxVal > minVal) {
+                    cnnActivations = (cnnActivations - minVal) / (maxVal - minVal);
+                }
+                
+                // Resize to match input dimensions
+                cv::resize(cnnActivations, cnnActivations, cv::Size(width, height), 0, 0, cv::INTER_LINEAR);
             }
         }
-        
-        // Normalize activations to [0,1] range
-        double minVal, maxVal;
-        cv::minMaxLoc(cnnActivations, &minVal, &maxVal);
-        if (maxVal > 0) {
-            cnnActivations = (cnnActivations - minVal) / (maxVal - minVal);
-        }
-        
-        // Resize to match input dimensions
-        cv::resize(cnnActivations, cnnActivations, cv::Size(width, height), 0, 0, cv::INTER_LINEAR);
     }
     
     // Calculate score for each node based on multiple criteria
@@ -1044,10 +1098,12 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
     
     // Optional: Add a smaller number of random activations for diversity
     const int numRandomSpikes = numInitialSpikes / 5; // 20% of the total
-    for (int i = 0; i < numRandomSpikes; i++) {
-        int randomIdx = rand() % graphNodes.size();
-        graphNodes[randomIdx]->incrementPotential(0.6f); // Moderate activation
-        graphNodes[randomIdx]->checkAndFire();
+    if (!graphNodes.empty()) {
+        for (int i = 0; i < numRandomSpikes; i++) {
+            int randomIdx = rand() % graphNodes.size();
+            graphNodes[randomIdx]->incrementPotential(0.6f); // Moderate activation
+            graphNodes[randomIdx]->checkAndFire();
+        }
     }
     
     // Log statistics of initial activations
@@ -1091,6 +1147,12 @@ cv::Mat NsgsPredictor::reconstructFromNeuralGraph()
     // This method is kept as a stub to maintain compatibility
     // See that file for the enhanced implementation using spatial clustering
     
+    // Safety checks before fallback implementation
+    if (inputShapes.empty() || inputShapes[0].size() < 4) {
+        std::cerr << "NSGS: Invalid input shapes for reconstruction" << std::endl;
+        return cv::Mat();
+    }
+    
     // Fallback implementation in case main implementation unavailable
     int width = (int)this->inputShapes[0][3];
     int height = (int)this->inputShapes[0][2];
@@ -1098,13 +1160,19 @@ cv::Mat NsgsPredictor::reconstructFromNeuralGraph()
     
     // For each node, color its area based on its class ID
     for (auto &node : graphNodes) {
+        if (!node) continue; // Skip null nodes
+        
         int classId = node->getClassId();
         if (classId >= 0) { // If node has been assigned a class
             cv::Point2i pos = node->getPosition();
-            int radius = 4; // Radius of influence for each node
             
-            // Draw a filled circle at the node's position with its class ID as the value
-            cv::circle(mask, pos, radius, cv::Scalar(classId + 1), -1); // +1 to avoid 0 (background)
+            // Ensure position is within image bounds
+            if (pos.x >= 0 && pos.x < width && pos.y >= 0 && pos.y < height) {
+                int radius = 4; // Radius of influence for each node
+                
+                // Draw a filled circle at the node's position with its class ID as the value
+                cv::circle(mask, pos, radius, cv::Scalar(classId + 1), -1); // +1 to avoid 0 (background)
+            }
         }
     }
     
@@ -1122,9 +1190,34 @@ void NsgsPredictor::runAsyncEventProcessing()
         return;
     }
     
-    // Get embeddings from the model's proto output (typically shape [1, proto_dim, H, W])
-    float* maskOutput = outputTensors[1].GetTensorMutableData<float>();
-    std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
+    // Validate tensor data before using
+    float* maskOutput = nullptr;
+    try {
+        maskOutput = outputTensors[1].GetTensorMutableData<float>();
+    } catch (const Ort::Exception& e) {
+        std::cerr << "NSGS: Error accessing mask output tensor: " << e.what() << std::endl;
+        return;
+    }
+    
+    if (!maskOutput) {
+        std::cerr << "NSGS: Invalid mask output data" << std::endl;
+        return;
+    }
+    
+    std::vector<int64_t> maskShape;
+    try {
+        maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
+    } catch (const Ort::Exception& e) {
+        std::cerr << "NSGS: Error getting mask shape: " << e.what() << std::endl;
+        return;
+    }
+    
+    // Validate shape dimensions
+    if (maskShape.size() < 4) {
+        std::cerr << "NSGS: Invalid mask shape, expected at least 4 dimensions" << std::endl;
+        return;
+    }
+    
     int protoChannels = maskShape[1]; // Number of proto/embedding channels
     int protoHeight = maskShape[2];
     int protoWidth = maskShape[3];
@@ -1139,7 +1232,25 @@ void NsgsPredictor::runAsyncEventProcessing()
     initializeNodePotentials(embeddings);
     
     // Process the main detection output to get high-confidence regions for seeding
-    float* boxOutput = outputTensors[0].GetTensorMutableData<float>();
+    float* boxOutput = nullptr;
+    try {
+        boxOutput = outputTensors[0].GetTensorMutableData<float>();
+    } catch (const Ort::Exception& e) {
+        std::cerr << "NSGS: Error accessing box output tensor: " << e.what() << std::endl;
+        return;
+    }
+    
+    if (!boxOutput) {
+        std::cerr << "NSGS: Invalid box output data" << std::endl;
+        return;
+    }
+    
+    // Validate output shape before using
+    if (this->outputShapes.size() < 1 || this->outputShapes[0].size() < 3) {
+        std::cerr << "NSGS: Invalid output shapes" << std::endl;
+        return;
+    }
+    
     cv::Mat output0 = cv::Mat(cv::Size((int)this->outputShapes[0][2], (int)this->outputShapes[0][1]), CV_32F, boxOutput).t();
     float* output0ptr = (float *)output0.data;
     int rows = (int)this->outputShapes[0][2];
@@ -1358,6 +1469,12 @@ std::vector<Yolov8Result> NsgsPredictor::postprocessing(const cv::Size &resizedI
                                                       const cv::Size &originalImageShape,
                                                       std::vector<Ort::Value> &outputTensors)
 {
+    // Safety check
+    if (outputTensors.empty()) {
+        std::cerr << "NSGS: Empty output tensors in postprocessing" << std::endl;
+        return {};
+    }
+    
     // Store the output tensors for use in NSGS processing
     this->outputTensors.clear();
     for (auto& tensor : outputTensors) {
@@ -1369,7 +1486,27 @@ std::vector<Yolov8Result> NsgsPredictor::postprocessing(const cv::Size &resizedI
     std::vector<float> confs;
     std::vector<int> classIds;
 
-    float *boxOutput = outputTensors[0].GetTensorMutableData<float>();
+    float *boxOutput = nullptr;
+    try {
+        if (!this->outputTensors.empty()) {
+            boxOutput = this->outputTensors[0].GetTensorMutableData<float>();
+        }
+    } catch (const Ort::Exception& e) {
+        std::cerr << "NSGS: Error accessing box output tensor: " << e.what() << std::endl;
+        return {};
+    }
+    
+    if (!boxOutput) {
+        std::cerr << "NSGS: Invalid box output data in postprocessing" << std::endl;
+        return {};
+    }
+    
+    // Validate output shape
+    if (this->outputShapes.empty() || this->outputShapes[0].size() < 3) {
+        std::cerr << "NSGS: Invalid output shapes in postprocessing" << std::endl;
+        return {};
+    }
+    
     cv::Mat output0 = cv::Mat(cv::Size((int)this->outputShapes[0][2], (int)this->outputShapes[0][1]), CV_32F, boxOutput).t();
     float *output0ptr = (float *)output0.data;
     int rows = (int)this->outputShapes[0][2];
@@ -1383,6 +1520,13 @@ std::vector<Yolov8Result> NsgsPredictor::postprocessing(const cv::Size &resizedI
     for (int i = 0; i < rows; i++)
     {
         std::vector<float> it(output0ptr + i * cols, output0ptr + (i + 1) * cols);
+        
+        // Safety check for classNums
+        if (it.size() < 4 + classNums) {
+            std::cerr << "NSGS: Detection output row too small for class count" << std::endl;
+            continue;
+        }
+        
         float confidence;
         int classId;
         this->getBestClassInfo(it.begin(), confidence, classId, classNums);
@@ -1391,8 +1535,11 @@ std::vector<Yolov8Result> NsgsPredictor::postprocessing(const cv::Size &resizedI
         {
             if (this->hasMask)
             {
-                std::vector<float> temp(it.begin() + 4 + classNums, it.end());
-                picked_proposals.push_back(temp);
+                // Check for valid mask proposals
+                if (it.size() > 4 + classNums) {
+                    std::vector<float> temp(it.begin() + 4 + classNums, it.end());
+                    picked_proposals.push_back(temp);
+                }
             }
             int centerX = (int)(it[0]);
             int centerY = (int)(it[1]);
@@ -1408,15 +1555,25 @@ std::vector<Yolov8Result> NsgsPredictor::postprocessing(const cv::Size &resizedI
 
     // Apply NMS
     std::vector<int> indices;
-    cv::dnn::NMSBoxes(boxes, confs, this->confThreshold, this->iouThreshold, indices);
+    if (!boxes.empty()) {
+        cv::dnn::NMSBoxes(boxes, confs, this->confThreshold, this->iouThreshold, indices);
+    }
 
     // Process masks if available
-    if (this->hasMask && outputTensors.size() > 1)
+    if (this->hasMask && this->outputTensors.size() > 1)
     {
-        float *maskOutput = outputTensors[1].GetTensorMutableData<float>();
-        std::vector<int64_t> maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
-        std::vector<int> mask_protos_shape = {1, (int)maskShape[1], (int)maskShape[2], (int)maskShape[3]};
-        mask_protos = cv::Mat(mask_protos_shape, CV_32F, maskOutput);
+        float *maskOutput = nullptr;
+        try {
+            maskOutput = this->outputTensors[1].GetTensorMutableData<float>();
+        } catch (const Ort::Exception& e) {
+            std::cerr << "NSGS: Error accessing mask output tensor: " << e.what() << std::endl;
+        }
+        
+        if (maskOutput && this->outputShapes.size() > 1 && this->outputShapes[1].size() >= 4) {
+            std::vector<int64_t> maskShape = this->outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
+            std::vector<int> mask_protos_shape = {1, (int)maskShape[1], (int)maskShape[2], (int)maskShape[3]};
+            mask_protos = cv::Mat(mask_protos_shape, CV_32F, maskOutput);
+        }
     }
     else if (this->hasMask)
     {
@@ -1465,7 +1622,17 @@ std::vector<Yolov8Result> NsgsPredictor::postprocessing(const cv::Size &resizedI
         {
             if (!picked_proposals.empty()) {
                 // Get the CNN-predicted mask
-                cv::Mat cnnMask = this->getMask(cv::Mat(picked_proposals[idx]).t(), mask_protos);
+                cv::Mat proposal_mat = cv::Mat(picked_proposals[idx]).t();
+                if (proposal_mat.empty()) {
+                    std::cerr << "NSGS: Empty proposal matrix" << std::endl;
+                    continue;
+                }
+                
+                cv::Mat cnnMask = this->getMask(proposal_mat, mask_protos);
+                if (cnnMask.empty()) {
+                    std::cerr << "NSGS: Failed to generate CNN mask" << std::endl;
+                    continue;
+                }
                 
                 // Create the NSGS refined segmentation mask (integrating CNN + NSGS)
                 cv::Mat refinedMask;
@@ -1572,30 +1739,55 @@ std::vector<Yolov8Result> NsgsPredictor::predict(cv::Mat &image)
         std::cout << "NSGS: Pipeline processing timed out, falling back to synchronous processing" << std::endl;
     }
     
+    // Validate image before processing
+    if (image.empty()) {
+        std::cerr << "NSGS: Empty image provided to predict" << std::endl;
+        return {};
+    }
+    
     // Original synchronous processing
     float *blob = nullptr;
     std::vector<int64_t> inputTensorShape{1, 3, -1, -1};
     this->preprocessing(image, blob, inputTensorShape);
 
+    // Safety check for blob allocation
+    if (!blob) {
+        std::cerr << "NSGS: Failed to allocate blob in preprocessing" << std::endl;
+        return {};
+    }
+
     size_t inputTensorSize = utils::vectorProduct(inputTensorShape);
     std::vector<float> inputTensorValues(blob, blob + inputTensorSize);
 
     std::vector<Ort::Value> inputTensors;
-    Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(
-        OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
+    try {
+        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(
+            OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
 
-    inputTensors.push_back(Ort::Value::CreateTensor<float>(
-        memoryInfo, inputTensorValues.data(), inputTensorSize,
-        inputTensorShape.data(), inputTensorShape.size()));
+        inputTensors.push_back(Ort::Value::CreateTensor<float>(
+            memoryInfo, inputTensorValues.data(), inputTensorSize,
+            inputTensorShape.data(), inputTensorShape.size()));
+    } catch (const Ort::Exception& e) {
+        std::cerr << "NSGS: Error creating input tensor: " << e.what() << std::endl;
+        delete[] blob;
+        return {};
+    }
 
-    // Run inference
-    std::vector<Ort::Value> outputTensors = this->session.Run(
-        Ort::RunOptions{nullptr},
-        this->inputNames.data(),
-        inputTensors.data(),
-        this->inputNames.size(),
-        this->outputNames.data(),
-        this->outputNames.size());
+    // Run inference with exception handling
+    std::vector<Ort::Value> outputTensors;
+    try {
+        outputTensors = this->session.Run(
+            Ort::RunOptions{nullptr},
+            this->inputNames.data(),
+            inputTensors.data(),
+            this->inputNames.size(),
+            this->outputNames.data(),
+            this->outputNames.size());
+    } catch (const Ort::Exception& e) {
+        std::cerr << "NSGS: Error running inference: " << e.what() << std::endl;
+        delete[] blob;
+        return {};
+    }
 
     // If using data parallelism, use partitioned processing
     if (numPartitions > 1 && !usePipeline) {
@@ -1616,14 +1808,20 @@ std::vector<Yolov8Result> NsgsPredictor::predict(cv::Mat &image)
             partition->start();
         }
         
-        // Wait for processing to complete
-        while (true) {
+        // Wait for processing to complete with timeout
+        const int maxIterations = 100; // Prevent infinite loop
+        int iterations = 0;
+        
+        while (iterations < maxIterations) {
             bool allDone = true;
             
             // Check if any partition has active work
             for (auto& partition : partitions) {
-                // Implement a check here - for now, just assume partitions are done
-                // This should actually check the local SpikeQueue of each partition
+                // Simple check - we'll continue improving this
+                if (!partition->getNodes().empty()) {
+                    allDone = false;
+                    break;
+                }
             }
             
             if (allDone) break;
@@ -1633,6 +1831,7 @@ std::vector<Yolov8Result> NsgsPredictor::predict(cv::Mat &image)
             
             // Sleep briefly
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            iterations++;
         }
         
         // Stop partitions

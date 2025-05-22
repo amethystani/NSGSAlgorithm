@@ -214,7 +214,7 @@ CMAKE_TAPI:FILEPATH=/Library/Developer/CommandLineTools/usr/bin/tapi
 CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 
 //Path to built ONNX Runtime directory.
-ONNXRUNTIME_DIR:BOOL=/Users/animesh/PCPPROJECT/Backend/onnxruntime-osx-arm64-1.15.0
+ONNXRUNTIME_DIR:BOOL=/Users/animesh/PCPPROJECT/Backend/build/../onnxruntime-osx-arm64-1.15.0
 
 //The directory containing a CMake configuration file for OpenCV.
 OpenCV_DIR:PATH=/opt/homebrew/lib/cmake/opencv4

@@ -236,6 +236,12 @@ void SpikeQueue::balanceLoad()
 
 void SpikeQueue::startProcessing(std::vector<std::shared_ptr<NeuronNode>>* nodes)
 {
+    // Safety check for nullptr
+    if (!nodes) {
+        std::cerr << "SpikeQueue: Null node vector pointer provided" << std::endl;
+        return;
+    }
+    
     // Store reference to nodes
     nodesRef = nodes;
     
@@ -574,13 +580,25 @@ void SpikeQueue::processSingleSpike(const Spike& spike)
     if (nodesRef && spike.targetNodeId >= 0 && static_cast<size_t>(spike.targetNodeId) < nodesRef->size()) {
         // Get the target node
         auto& targetNode = (*nodesRef)[spike.targetNodeId];
-        
+        if (!targetNode) return;
+
+        // Get the source node for class information
+        int sourceClassId = -1;
+        float sourceConfidence = 0.0f;
+        if (spike.sourceNodeId >= 0 && static_cast<size_t>(spike.sourceNodeId) < nodesRef->size()) {
+            auto& sourceNode = (*nodesRef)[spike.sourceNodeId];
+            if (sourceNode) {
+                sourceClassId = sourceNode->getClassId();
+                sourceConfidence = sourceNode->getConfidence();
+            }
+        }
+
         // Record node's current state (for convergence detection)
         int oldClassId = targetNode->getClassId();
         float oldConfidence = targetNode->getConfidence();
         
-        // Deliver the spike
-        targetNode->receiveSpike(spike.weight);
+        // Deliver the spike with class information
+        targetNode->receiveSpike(spike.weight, sourceClassId, sourceConfidence);
         
         // Check if the node changed state
         if (oldClassId != targetNode->getClassId() || 
@@ -675,8 +693,29 @@ void SpikeQueue::workerThreadFunction(int threadId)
 }
 
 void SpikeQueue::registerNodeEdgeStrength(int nodeId, float edgeStrength) {
+    if (nodeId < 0) return;  // Skip invalid nodes
+    
     std::lock_guard<std::mutex> lock(edgeStrengthMutex);
-    nodeEdgeStrengths[nodeId] = edgeStrength;
+    
+    // Register edge strength for node (used for all its connections)
+    nodeEdgeStrengths[nodeId] = std::min(1.0f, std::max(0.0f, edgeStrength));
+    
+    // Update existing edges involving this node
+    for (auto& edgePair : edgeStrengths) {
+        if (edgePair.first.first == nodeId || edgePair.first.second == nodeId) {
+            // Calculate average of node edge strengths
+            int otherId = (edgePair.first.first == nodeId) ? edgePair.first.second : edgePair.first.first;
+            float otherStrength = 0.0f;
+            
+            auto otherIt = nodeEdgeStrengths.find(otherId);
+            if (otherIt != nodeEdgeStrengths.end()) {
+                otherStrength = otherIt->second;
+            }
+            
+            // Update edge strength (average of node strengths)
+            edgePair.second = (nodeEdgeStrengths[nodeId] + otherStrength) / 2.0f;
+        }
+    }
 }
 
 void SpikeQueue::updateNodeEdgeStrength(int nodeId, float edgeStrength) {

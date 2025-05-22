@@ -3,17 +3,20 @@
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
+#include <mutex>
+#include <iostream>
 
-NeuronNode::NeuronNode(int id, cv::Point2i position, std::weak_ptr<SpikeQueue> queue)
+NeuronNode::NeuronNode(int id, cv::Point2i position, std::shared_ptr<SpikeQueue> queue)
     : id(id), 
       position(position), 
       statePotential(0.0f),
+      refractoryPeriod(0),
       threshold(0.5f),
-      adaptiveThresholdModifier(1.0f),
+      initialThreshold(0.5f),
       classId(-1),
       confidence(0.0f),
-      hasSpike(false),
-      refractoryPeriod(0),
+      adaptiveThresholdModifier(1.0f),
+      edgeStrength(0.0f),
       spikeQueue(queue)
 {
     // Initialize with empty feature vector
@@ -22,50 +25,88 @@ NeuronNode::NeuronNode(int id, cv::Point2i position, std::weak_ptr<SpikeQueue> q
 
 void NeuronNode::setFeatures(const std::vector<float>& featureVector)
 {
+    // Safety check for very large feature vectors
+    if (featureVector.size() > 10000) { // Arbitrary reasonable limit to prevent memory issues
+        std::cerr << "NeuronNode: Feature vector too large: " << featureVector.size() << " elements" << std::endl;
+        return;
+    }
+    
+    std::lock_guard<std::mutex> lock(nodeMutex);
     features = featureVector;
 }
 
-void NeuronNode::addConnection(std::weak_ptr<NeuronNode> node, float weight)
+void NeuronNode::addConnection(std::shared_ptr<NeuronNode> target, float weight)
 {
-    connections.push_back(node);
-    connectionWeights.push_back(weight);
+    // Safety check for target node
+    if (!target) {
+        std::cerr << "NeuronNode: Attempt to add null connection target" << std::endl;
+        return;
+    }
+    
+    // Safety check for valid weight values
+    if (weight <= 0.0f || std::isnan(weight) || std::isinf(weight)) {
+        std::cerr << "NeuronNode: Invalid connection weight: " << weight << std::endl;
+        return;
+    }
+    
+    std::lock_guard<std::mutex> lock(connectionMutex);
+    
+    // Add connection to the target node with specified weight
+    connections.push_back({target, weight});
 }
 
 void NeuronNode::resetState()
 {
     statePotential.store(0.0f);
-    hasSpike = false;
     refractoryPeriod.store(0);
     // Do not reset class ID and confidence as they represent the final state
 }
 
-void NeuronNode::incrementPotential(float value)
+void NeuronNode::incrementPotential(float amount)
 {
-    // Use atomic add operation to safely increment potential
+    // Safety check for valid increment
+    if (amount <= 0.0f || std::isnan(amount) || std::isinf(amount)) {
+        return;
+    }
+    
+    std::lock_guard<std::mutex> lock(nodeMutex);
     float current = statePotential.load();
-    statePotential.store(current + value);
-}
-
-void NeuronNode::decrementPotential(float value)
-{
-    // Use atomic subtract operation to safely decrement potential
-    float current = statePotential.load();
-    float newValue = std::max(0.0f, current - value);
+    float newValue = current + amount;
+    
+    // Cap potential at a maximum value to prevent numerical issues
+    const float maxPotential = 10.0f;
+    newValue = std::min(newValue, maxPotential);
+    
     statePotential.store(newValue);
 }
 
 void NeuronNode::setThreshold(float value)
 {
     threshold = value;
+    initialThreshold = value;
 }
 
-void NeuronNode::adaptThreshold(float contextModifier)
+void NeuronNode::adaptThreshold(float multiplier)
 {
-    adaptiveThresholdModifier = contextModifier;
+    // Safety check for valid multiplier
+    if (multiplier <= 0.0f || std::isnan(multiplier) || std::isinf(multiplier)) {
+        return;
+    }
+    
+    // Clamp multiplier to reasonable range
+    float safeMultiplier = std::min(5.0f, std::max(0.2f, multiplier));
+    
+    std::lock_guard<std::mutex> lock(nodeMutex);
+    adaptiveThresholdModifier = safeMultiplier;
+    
+    // Recalculate effective threshold with adaptation factors
+    updateEffectiveThreshold();
 }
 
 bool NeuronNode::checkAndFire()
 {
+    std::lock_guard<std::mutex> lock(nodeMutex);
+    
     // If in refractory period, cannot fire
     if (refractoryPeriod.load() > 0)
     {
@@ -93,11 +134,11 @@ bool NeuronNode::checkAndFire()
             int activeNeighbors = 0;
             
             for (size_t i = 0; i < connections.size(); i++) {
-                if (auto neighbor = connections[i].lock()) {
-                    int neighborClass = neighbor->getClassId();
+                if (connections[i].target) {
+                    int neighborClass = connections[i].target->getClassId();
                     if (neighborClass >= 0) {
                         neighborClassCounts[neighborClass]++;
-                        neighborClassConfidences[neighborClass] += neighbor->getConfidence();
+                        neighborClassConfidences[neighborClass] += connections[i].target->getConfidence();
                         activeNeighbors++;
                     }
                 }
@@ -145,9 +186,6 @@ bool NeuronNode::checkAndFire()
         }
         
         if (shouldFire) {
-            // Generate a spike
-            hasSpike = true;
-            
             // Reset potential
             statePotential.store(0.0f);
             
@@ -160,8 +198,15 @@ bool NeuronNode::checkAndFire()
                 refractoryPeriod.store(baseRefractoryPeriod);
             }
             
-            // Propagate spike to neighbors
-            propagateToNeighbors();
+            // Send spikes to all connected nodes
+            if (spikeQueue) {
+                for (size_t i = 0; i < connections.size(); i++) {
+                    if (connections[i].target) {
+                        // Add spike to the queue
+                        spikeQueue->addSpike(id, connections[i].target->getId(), connections[i].weight);
+                    }
+                }
+            }
             
             return true;
         }
@@ -170,70 +215,34 @@ bool NeuronNode::checkAndFire()
     return false;
 }
 
-void NeuronNode::propagateToNeighbors()
+void NeuronNode::receiveSpike(float inputStrength, int sourceClassId, float sourceConfidence)
 {
-    // Get shared_ptr to the queue
-    auto queue = spikeQueue.lock();
-    if (!queue) return; // Queue not available
-    
-    // Send spikes to all connected nodes
-    for (size_t i = 0; i < connections.size(); i++)
-    {
-        if (auto neighbor = connections[i].lock())
-        {
-            // Add spike to the queue (priority calculation happens in SpikeQueue now)
-            // The SpikeQueue will automatically prioritize spikes near edges
-            queue->addSpike(id, neighbor->getId(), connectionWeights[i]);
-        }
-    }
-}
-
-void NeuronNode::receiveSpike(float weight)
-{
-    // When receiving a spike, increase potential based on the connection weight
-    incrementPotential(weight * 0.5f); // Scale factor to control influence
-    
-    // NSGS Core: Update class ID based on spikes received
-    // If this node has no class yet and the spike is strong enough,
-    // check if the source node has a class assigned
-    if (classId < 0 && statePotential.load() > threshold * 0.7f) {
-        // Try to find the source node in our connections to get its class
-        for (size_t i = 0; i < connections.size(); i++) {
-            if (auto neighbor = connections[i].lock()) {
-                int neighborClassId = neighbor->getClassId();
-                if (neighborClassId >= 0) {
-                    // Calculate how strongly this node should adopt the neighbor's class
-                    // Based on feature similarity and connection strength
-                    float similarityScore = 1.0f;
-                    const std::vector<float>& myFeatures = getFeatures();
-                    const std::vector<float>& neighborFeatures = neighbor->getFeatures();
-                    if (!myFeatures.empty() && !neighborFeatures.empty()) {
-                        // Simple feature similarity calculation (dot product)
-                        float dotProduct = 0.0f;
-                        size_t featureSize = std::min(myFeatures.size(), neighborFeatures.size());
-                        for (size_t j = 0; j < featureSize; j++) {
-                            dotProduct += myFeatures[j] * neighborFeatures[j];
-                        }
-                        similarityScore = std::max(0.0f, dotProduct / featureSize);
-                    }
-                    
-                    // Class propagation happens when similarity is high and potential is sufficient
-                    float propagationStrength = similarityScore * (statePotential.load() / threshold);
-                    if (propagationStrength > 0.8f) {
-                        classId = neighborClassId;
-                        confidence = propagationStrength * neighbor->getConfidence();
-                        break;
-                    }
-                }
-            }
-        }
+    // Safety check for invalid inputs
+    if (inputStrength <= 0.0f || sourceClassId < 0 || sourceConfidence <= 0.0f) {
+        return;
     }
     
-    // Check if this causes the node to fire
-    checkAndFire();
+    float adaptedStrength = inputStrength;
+    
+    std::lock_guard<std::mutex> lock(nodeMutex);
+    
+    // Increment membrane potential
+    statePotential.store(statePotential.load() + adaptedStrength);
+    
+    // Class competition (only adopt source class if it has higher confidence than current)
+    if (sourceClassId >= 0 && (classId < 0 || sourceConfidence > confidence)) {
+        classId = sourceClassId;
+        
+        // Slightly reduce confidence with each hop for more conservative propagation
+        confidence = sourceConfidence * 0.95f;
+    }
+    
+    // Check if this causes the neuron to fire
+    // Note: not calling checkAndFire() here to avoid deadlock (we'd need to release nodeMutex)
+    // The node will be checked in the next processing cycle
 }
 
-cv::Scalar NeuronNode::getColorByState() const
+cv::Scalar NeuronNode::getColorForVisualization() const
 {
     if (classId >= 0)
     {
@@ -257,4 +266,29 @@ cv::Scalar NeuronNode::getColorByState() const
         int blue = static_cast<int>(255 * (1.0f - potentialRatio));
         return cv::Scalar(blue, 0, red);
     }
+}
+
+void NeuronNode::updateEffectiveThreshold()
+{
+    // Recalculate effective threshold with adaptation factors
+    float newThreshold = threshold * adaptiveThresholdModifier;
+    statePotential.store(std::min(statePotential.load(), newThreshold));
+}
+
+void NeuronNode::setEdgeStrength(float strength)
+{
+    // Safety check for valid strength value
+    if (strength < 0.0f || std::isnan(strength) || std::isinf(strength)) {
+        return;
+    }
+    
+    // Clamp to valid range
+    float safeStrength = std::min(1.0f, std::max(0.0f, strength));
+    
+    std::lock_guard<std::mutex> lock(nodeMutex);
+    edgeStrength = safeStrength;
+    
+    // Edge neurons (high edge strength) should have higher thresholds
+    // to prevent unwanted propagation across object boundaries
+    updateEffectiveThreshold();
 } 
