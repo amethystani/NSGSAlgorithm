@@ -78,6 +78,8 @@ private:
     // Event-driven processing methods
     void initializeNodePotentials(const cv::Mat &embeddings);
     void extractNodeFeatures(const cv::Mat &image, const cv::Mat &embeddings);
+    void extractNodeFeaturesHierarchical(const cv::Mat &image, const cv::Mat &embeddings);
+    void createSelectiveConnections(const cv::Mat &image, const cv::Mat &labels, const std::vector<cv::Point2d> &centers);
     void registerNodeEdgeStrengths(const cv::Mat &image);
     void propagateSpikes(bool adaptToThermal = true);
     cv::Mat reconstructFromNeuralGraph();
