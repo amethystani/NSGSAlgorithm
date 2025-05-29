@@ -700,9 +700,9 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
             auto& firingNeuron = firingNeurons[i];
             
             cv::Point2i firingPos = firingNeuron->getPosition();
-            const float maxPropagationDistance = 200.0f; // Increased synaptic reach for better propagation
+            const float maxPropagationDistance = 300.0f; // Increased from 200 for better reach
             int spikesSent = 0;
-            const int maxSpikesPerNeuron = 15; // Increased connections per neuron
+            const int maxSpikesPerNeuron = 25; // Increased from 15 for more connections
             
             for (auto& targetNeuron : graphNodes) {
                 if (targetNeuron->getId() == firingNeuron->getId()) continue; // Skip self
@@ -718,8 +718,8 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
                     float synapticWeight = 1.0f - (distance / maxPropagationDistance); // 0-1 weight
                     
                     // NEUROMORPHIC: Synaptic fatigue - reduce strength in later rounds
-                    float fatigueMultiplier = 1.0f - (propagationRounds * 0.08f); // Reduced fatigue: 8% per round
-                    fatigueMultiplier = std::max(0.3f, fatigueMultiplier); // Keep minimum 30% strength
+                    float fatigueMultiplier = 1.0f - (propagationRounds * 0.05f); // Reduced fatigue: 5% per round
+                    fatigueMultiplier = std::max(0.4f, fatigueMultiplier); // Keep minimum 40% strength
                     
                     // ADAPTIVE: Spike strength based on neuron priority and distance
                     float baseSpikeStrength = 0.5f; // Further increased for realistic chain reactions
@@ -773,8 +773,8 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
         std::cout << "NSGS NEUROMORPHIC: Round " << propagationRounds 
                   << " complete - " << nextFiringNeurons.size() << " new firing neurons (activity ratio: " << activityRatio << ")" << std::endl;
         
-        // NEUROMORPHIC: Stop if activity is very low (network converged) - more realistic threshold
-        if (activityRatio < 0.1f && propagationRounds > 2) { // 10% threshold after at least 2 rounds
+        // NEUROMORPHIC: Stop if activity is very low (network converged) - relaxed threshold for realistic propagation
+        if (activityRatio < 0.03f && propagationRounds > 3) { // 3% threshold after at least 3 rounds
             std::cout << "NSGS NEUROMORPHIC: Spike propagation converged - low activity detected" << std::endl;
             break;
         }
@@ -909,8 +909,8 @@ void NsgsPredictor::runAsyncEventProcessing()
                     }
                 }
                 
-                // Only assign if close enough to a detected object (within 100 pixels)
-                if (minDistance < 100.0f && assignedClass != -1) {
+                // Only assign if close enough to a detected object (within 150 pixels for better coverage)
+                if (minDistance < 150.0f && assignedClass != -1) {
                     neuron->setClassId(assignedClass);
                     classAssignments[i] = assignedClass;
                 }
@@ -943,7 +943,7 @@ void NsgsPredictor::runAsyncEventProcessing()
                     float dy = static_cast<float>(pos.y - otherPos.y);
                     float distance = std::sqrt(dx*dx + dy*dy);
                     
-                    if (distance < minDistance && distance < 80.0f) { // Within influence range
+                    if (distance < minDistance && distance < 120.0f) { // Within influence range - increased
                         minDistance = distance;
                         nearestClass = classAssignments[j];
                     }
