@@ -616,8 +616,40 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
                       return a->getPotential() > b->getPotential();
                   });
         
-        // Stimulate top neurons to reach firing threshold
-        int stimulationCount = std::min(20, static_cast<int>(subthresholdNeurons.size()));
+        // ADAPTIVE: Stimulation count based on detected objects and image complexity
+        int baseStimulation = 30; // Increased base
+        
+        // Get detection count from recent processing
+        int detectionCount = 0;
+        if (!this->outputTensors.empty()) {
+            float *boxOutput = this->outputTensors[0].GetTensorMutableData<float>();
+            if (boxOutput && !this->outputShapes.empty()) {
+                cv::Mat output0 = cv::Mat(cv::Size((int)this->outputShapes[0][2], (int)this->outputShapes[0][1]), CV_32F, boxOutput).t();
+                float *output0ptr = (float *)output0.data;
+                int rows = std::min(1000, (int)this->outputShapes[0][2]); // Limit scan
+                int cols = (int)this->outputShapes[0][1];
+                
+                for (int i = 0; i < rows; i++) {
+                    std::vector<float> it(output0ptr + i * cols, output0ptr + (i + 1) * cols);
+                    if (it.size() >= 4 + classNums) {
+                        float confidence;
+                        int classId;
+                        this->getBestClassInfo(it.begin(), confidence, classId, classNums);
+                        if (confidence > 0.25f) detectionCount++; // Count significant detections
+                    }
+                }
+            }
+        }
+        
+        // ADAPTIVE: More stimulation for complex scenes with many objects
+        int adaptiveStimulation = baseStimulation + (detectionCount * 10); // 10 extra per detection
+        adaptiveStimulation = std::min(200, std::max(20, adaptiveStimulation)); // Range: 20-200
+        
+        int stimulationCount = std::min(adaptiveStimulation, static_cast<int>(subthresholdNeurons.size()));
+        
+        std::cout << "NSGS NEUROMORPHIC: Adaptive stimulation - " << detectionCount << " detections detected, stimulating " 
+                  << stimulationCount << " neurons" << std::endl;
+        
         for (int i = 0; i < stimulationCount; i++) {
             auto& neuron = subthresholdNeurons[i];
             float currentPotential = neuron->getPotential();
@@ -627,12 +659,14 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
             neuron->incrementPotential(stimulation);
             if (neuron->checkAndFire()) {
                 firingNeurons.push_back(neuron);
-                std::cout << "NSGS NEUROMORPHIC: Stimulated neuron " << neuron->getId() 
-                          << " to fire (stim=" << stimulation << ")" << std::endl;
+                if (i < 10) { // Log first 10 for brevity
+                    std::cout << "NSGS NEUROMORPHIC: Stimulated neuron " << neuron->getId() 
+                              << " to fire (stim=" << stimulation << ")" << std::endl;
+                }
             }
         }
         
-        std::cout << "NSGS NEUROMORPHIC: After stimulation: " << firingNeurons.size() 
+        std::cout << "NSGS NEUROMORPHIC: After adaptive stimulation: " << firingNeurons.size() 
                   << " total firing neurons" << std::endl;
     }
     
@@ -666,9 +700,9 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
             auto& firingNeuron = firingNeurons[i];
             
             cv::Point2i firingPos = firingNeuron->getPosition();
-            const float maxPropagationDistance = 100.0f; // Reduced synaptic reach
+            const float maxPropagationDistance = 200.0f; // Increased synaptic reach for better propagation
             int spikesSent = 0;
-            const int maxSpikesPerNeuron = 10; // NEUROMORPHIC: Limit synaptic outputs per neuron
+            const int maxSpikesPerNeuron = 15; // Increased connections per neuron
             
             for (auto& targetNeuron : graphNodes) {
                 if (targetNeuron->getId() == firingNeuron->getId()) continue; // Skip self
@@ -684,10 +718,12 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
                     float synapticWeight = 1.0f - (distance / maxPropagationDistance); // 0-1 weight
                     
                     // NEUROMORPHIC: Synaptic fatigue - reduce strength in later rounds
-                    float fatigueMultiplier = 1.0f - (propagationRounds * 0.15f); // 15% reduction per round
-                    fatigueMultiplier = std::max(0.1f, fatigueMultiplier);
+                    float fatigueMultiplier = 1.0f - (propagationRounds * 0.08f); // Reduced fatigue: 8% per round
+                    fatigueMultiplier = std::max(0.3f, fatigueMultiplier); // Keep minimum 30% strength
                     
-                    float spikeStrength = 0.15f * synapticWeight * fatigueMultiplier; // Reduced base strength
+                    // ADAPTIVE: Spike strength based on neuron priority and distance
+                    float baseSpikeStrength = 0.5f; // Further increased for realistic chain reactions
+                    float spikeStrength = baseSpikeStrength * synapticWeight * fatigueMultiplier;
                     
                     // NEUROMORPHIC: Check if target is in refractory period (recently fired)
                     // For simplicity, assume neurons that are already firing are in refractory
@@ -737,8 +773,8 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
         std::cout << "NSGS NEUROMORPHIC: Round " << propagationRounds 
                   << " complete - " << nextFiringNeurons.size() << " new firing neurons (activity ratio: " << activityRatio << ")" << std::endl;
         
-        // NEUROMORPHIC: Stop if activity is very low (network converged)
-        if (activityRatio < 0.02f) { // Less than 2% of neurons cause new firing
+        // NEUROMORPHIC: Stop if activity is very low (network converged) - more realistic threshold
+        if (activityRatio < 0.1f && propagationRounds > 2) { // 10% threshold after at least 2 rounds
             std::cout << "NSGS NEUROMORPHIC: Spike propagation converged - low activity detected" << std::endl;
             break;
         }
@@ -792,6 +828,46 @@ void NsgsPredictor::runAsyncEventProcessing()
     int firingNeurons = 0;
     std::vector<int> classAssignments(graphNodes.size(), -1);
     
+    // FIRST: Get actual detected objects and their bounding boxes for class assignment
+    std::vector<cv::Rect> detectedBoxes;
+    std::vector<int> detectedClasses;
+    std::vector<float> detectedConfs;
+    
+    if (!this->outputTensors.empty()) {
+        float *boxOutput = this->outputTensors[0].GetTensorMutableData<float>();
+        if (boxOutput && !this->outputShapes.empty()) {
+            cv::Mat output0 = cv::Mat(cv::Size((int)this->outputShapes[0][2], (int)this->outputShapes[0][1]), CV_32F, boxOutput).t();
+            float *output0ptr = (float *)output0.data;
+            int rows = (int)this->outputShapes[0][2];
+            int cols = (int)this->outputShapes[0][1];
+            
+            // Extract detected objects
+            for (int i = 0; i < rows; i++) {
+                std::vector<float> it(output0ptr + i * cols, output0ptr + (i + 1) * cols);
+                if (it.size() >= 4 + classNums) {
+                    float confidence;
+                    int classId;
+                    this->getBestClassInfo(it.begin(), confidence, classId, classNums);
+                    
+                    if (confidence > this->confThreshold) {
+                        int centerX = (int)(it[0]);
+                        int centerY = (int)(it[1]);
+                        int width = (int)(it[2]);
+                        int height = (int)(it[3]);
+                        int left = centerX - width / 2;
+                        int top = centerY - height / 2;
+                        
+                        detectedBoxes.emplace_back(left, top, width, height);
+                        detectedClasses.push_back(classId);
+                        detectedConfs.push_back(confidence);
+                    }
+                }
+            }
+        }
+    }
+    
+    std::cout << "NSGS NEUROMORPHIC: Found " << detectedBoxes.size() << " detected objects for class assignment" << std::endl;
+    
     // Analyze final neuron states after spike propagation
     for (size_t i = 0; i < graphNodes.size(); i++) {
         auto& neuron = graphNodes[i];
@@ -804,24 +880,40 @@ void NsgsPredictor::runAsyncEventProcessing()
             if (potential > threshold) { // Neuron is firing
                 firingNeurons++;
                 
-                // NEUROMORPHIC: Simple class assignment based on position and activity
+                // PROPER CLASS ASSIGNMENT: Assign neuron to detected object it's closest to
                 cv::Point2i pos = neuron->getPosition();
-                int width = (int)this->inputShapes[0][3];
-                int height = (int)this->inputShapes[0][2];
+                int assignedClass = -1;
+                float minDistance = std::numeric_limits<float>::max();
                 
-                // Assign class based on spatial regions and activity level
-                int regionX = (pos.x * 4) / width;   // 4x4 grid
-                int regionY = (pos.y * 4) / height;
-                int baseClass = (regionY * 4 + regionX) % 80; // Map to COCO classes
+                // Find closest detected object
+                for (size_t j = 0; j < detectedBoxes.size(); j++) {
+                    cv::Rect box = detectedBoxes[j];
+                    
+                    // Check if neuron is inside the bounding box
+                    if (pos.x >= box.x && pos.x < box.x + box.width &&
+                        pos.y >= box.y && pos.y < box.y + box.height) {
+                        assignedClass = detectedClasses[j];
+                        minDistance = 0; // Inside box = minimum distance
+                        break;
+                    }
+                    
+                    // Calculate distance to box center if not inside
+                    float boxCenterX = box.x + box.width / 2.0f;
+                    float boxCenterY = box.y + box.height / 2.0f;
+                    float distance = std::sqrt((pos.x - boxCenterX) * (pos.x - boxCenterX) + 
+                                             (pos.y - boxCenterY) * (pos.y - boxCenterY));
+                    
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        assignedClass = detectedClasses[j];
+                    }
+                }
                 
-                // Modulate class based on firing strength
-                float firingStrength = potential / threshold;
-                int classId = baseClass;
-                if (firingStrength > 2.0f) classId = (baseClass + 1) % 80;
-                if (firingStrength > 3.0f) classId = (baseClass + 2) % 80;
-                
-                neuron->setClassId(classId);
-                classAssignments[i] = classId;
+                // Only assign if close enough to a detected object (within 100 pixels)
+                if (minDistance < 100.0f && assignedClass != -1) {
+                    neuron->setClassId(assignedClass);
+                    classAssignments[i] = assignedClass;
+                }
             }
         }
         
@@ -2586,24 +2678,24 @@ void NsgsPredictor::initializeNodePotentialsFromEmbeddings(const cv::Mat &image,
         int y = std::min(image.rows - 1, std::max(0, pos.y));
         
         // NEUROMORPHIC: Set adaptive firing threshold
-        float baseThreshold = 0.5f;
+        float baseThreshold = 0.4f; // Reduced from 0.5f to make firing more likely
         float edgeStrength = edgeMap.at<float>(y, x);
         
-        // Higher threshold at edges to prevent spurious firing
-        float adaptiveThreshold = baseThreshold * (1.0f + 0.5f * edgeStrength);
+        // Higher threshold at edges to prevent spurious firing - reduced multiplier
+        float adaptiveThreshold = baseThreshold * (1.0f + 0.3f * edgeStrength); // Reduced from 0.5f
         neuron->setThreshold(adaptiveThreshold * this->globalThresholdMultiplier);
         
         // NEUROMORPHIC: Set initial membrane potential
-        float initialPotential = 0.1f; // Resting potential
+        float initialPotential = 0.15f; // Increased resting potential
         
         // Add activation-based potential if CNN indicates strong features
         if (!activationMap.empty()) {
             float cnnActivation = activationMap.at<float>(y, x);
-            initialPotential += 0.3f * cnnActivation; // Boost potential in high-activation areas
+            initialPotential += 0.4f * cnnActivation; // Increased boost for high-activation areas
         }
         
         // Add small edge-based potential for boundary detection
-        initialPotential += 0.1f * edgeStrength;
+        initialPotential += 0.15f * edgeStrength; // Increased edge contribution
         
         // Set the neuron's initial state
         neuron->resetState();
@@ -2613,5 +2705,5 @@ void NsgsPredictor::initializeNodePotentialsFromEmbeddings(const cv::Mat &image,
     }
     
     std::cout << "NSGS NEUROMORPHIC: Initialized " << neuronsInitialized << " neurons with firing dynamics" << std::endl;
-    std::cout << "NSGS NEUROMORPHIC: Base threshold = 0.5, Global multiplier = " << this->globalThresholdMultiplier << std::endl;
+    std::cout << "NSGS NEUROMORPHIC: Base threshold = 0.4, Global multiplier = " << this->globalThresholdMultiplier << std::endl;
 }
