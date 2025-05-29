@@ -598,11 +598,15 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
     std::vector<std::shared_ptr<NeuronNode>> subthresholdNeurons;
     
     for (auto& neuron : graphNodes) {
+        // NEUROMORPHIC: Check potential BEFORE firing to display correct values
+        float currentPotential = neuron->getPotential();
+        float firingThreshold = neuron->getThreshold();
+        
         if (neuron->checkAndFire()) {
             firingNeurons.push_back(neuron);
             std::cout << "NSGS NEUROMORPHIC: Neuron " << neuron->getId() 
-                      << " fires! (potential=" << neuron->getPotential() 
-                      << ", threshold=" << neuron->getThreshold() << ")" << std::endl;
+                      << " fires! (potential=" << currentPotential 
+                      << ", threshold=" << firingThreshold << ")" << std::endl;
         } else {
             subthresholdNeurons.push_back(neuron);
         }
@@ -2699,20 +2703,28 @@ void NsgsPredictor::initializeNodePotentialsFromEmbeddings(const cv::Mat &image,
         neuron->setThreshold(adaptiveThreshold * this->globalThresholdMultiplier);
         
         // NEUROMORPHIC: Set initial membrane potential
-        float initialPotential = 0.15f; // Increased resting potential
+        float initialPotential = 0.15f; // Base resting potential
         
         // Add activation-based potential if CNN indicates strong features
         if (!activationMap.empty()) {
             float cnnActivation = activationMap.at<float>(y, x);
-            initialPotential += 0.4f * cnnActivation; // Increased boost for high-activation areas
+            initialPotential += 0.4f * cnnActivation; // CNN boost
         }
         
-        // Add small edge-based potential for boundary detection
-        initialPotential += 0.15f * edgeStrength; // Increased edge contribution
+        // Add edge-based potential for boundary detection
+        initialPotential += 0.15f * edgeStrength; // Edge contribution
         
         // Set the neuron's initial state
         neuron->resetState();
         neuron->incrementPotential(initialPotential);
+        
+        // Debug: Log first few neurons to verify potential setting
+        if (neuronsInitialized < 5) {
+            std::cout << "NSGS DEBUG: Neuron " << neuron->getId() 
+                      << " initialized with potential=" << initialPotential 
+                      << " (actual=" << neuron->getPotential() << ")"
+                      << ", threshold=" << (adaptiveThreshold * this->globalThresholdMultiplier) << std::endl;
+        }
         
         neuronsInitialized++;
     }
