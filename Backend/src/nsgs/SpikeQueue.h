@@ -12,6 +12,7 @@
 #include <vector>
 #include <array>
 #include <unordered_map>
+#include <condition_variable>
 
 // Forward declaration
 class NeuronNode;
@@ -237,11 +238,19 @@ private:
     // Load balancing
     void balanceLoad();
     
+    // Check if any other thread has work (for termination detection)
+    bool anyOtherThreadHasWork(int current_thread_id);
+    
     // Convergence tracking methods
     void recordConvergenceData();
     bool checkConvergence();
     void updateActivity();
     
+    // For robust termination detection
+    std::atomic<int> system_idle_confirmations{0};
+    std::condition_variable idle_condition_var;
+    std::mutex idle_mutex;
+
 public:
     SpikeQueue(int numThreads = 4); // Default to 4 threads
     ~SpikeQueue();

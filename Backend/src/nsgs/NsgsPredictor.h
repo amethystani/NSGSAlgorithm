@@ -128,9 +128,12 @@ public:
     void setThermalState(float temperature);
     void adaptsGlobalThreshold(float systemLoad);
     
-    // Parallelism configuration
+    // Pipeline control
     void enablePipeline(bool enable) { usePipeline = enable; }
     void setNumPartitions(int num) { numPartitions = std::max(1, num); }
+    
+    // Direct detection method with better timeout handling
+    std::vector<Yolov8Result> detect(cv::Mat& image, float confThreshold, float iouThreshold, float maskThreshold);
 }; 
 
 // Graph partition class for data parallelism

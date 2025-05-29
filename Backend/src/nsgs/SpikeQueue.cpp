@@ -9,6 +9,9 @@
 // Initialize thread_local ID
 thread_local int SpikeQueue::threadLocalId = -1;
 
+// Define a threshold for idle confirmations
+const int IDLE_CONFIRMATION_THRESHOLD = 3; // Number of cycles threads check for idleness
+
 SpikeQueue::SpikeQueue(int numThreads)
     : processing(false),
       terminated(false),
@@ -23,7 +26,8 @@ SpikeQueue::SpikeQueue(int numThreads)
       lastActivityTime(std::chrono::steady_clock::now()),
       numThreads(numThreads),
       activeWorkers(0),
-      nextThreadId(0)
+      nextThreadId(0),
+      system_idle_confirmations(0) // Initialize idle confirmations to 0
 {
     // Validate thread count and adjust if needed
     this->numThreads = std::max(1, numThreads);
@@ -52,13 +56,22 @@ SpikeQueue::~SpikeQueue()
 
 void SpikeQueue::addSpike(const Spike& spike)
 {
-    // Add the spike to the global queue
+    // Check if processing is active before adding spike
+    if (!processing.load()) {
+        // Trying to add spike when not active - log or handle as needed
+        return;
+    }
+
+    bool added = false;
+
+    // Reset idle counter as new work is available
+    system_idle_confirmations.store(0);
+
     {
         std::lock_guard<std::mutex> lock(globalQueueMutex);
         globalQueue.push(spike);
-        
-        // Update total queued counter
         totalQueuedSpikes.fetch_add(1);
+        added = true;
         
         // Update high watermark (global + all thread queues)
         size_t totalSize = globalQueue.size();
@@ -72,12 +85,15 @@ void SpikeQueue::addSpike(const Spike& spike)
         }
     }
     
-    // Record activity timestamp - a spike was added
-    lastActivityTime = std::chrono::steady_clock::now();
-    hasRecentActivity.store(true);
-    
     // Notify waiting threads
-    globalQueueCondition.notify_one();
+    if (added) {
+        // Record activity timestamp - a spike was added
+        lastActivityTime = std::chrono::steady_clock::now();
+        hasRecentActivity.store(true);
+
+        // Notify one waiting thread using idle_condition_var, not globalQueueCondition
+        idle_condition_var.notify_one();
+    }
 }
 
 void SpikeQueue::addSpike(int sourceNodeId, int targetNodeId, float weight)
@@ -130,13 +146,13 @@ bool SpikeQueue::tryGetNextSpike(Spike& spike)
 
 bool SpikeQueue::getLocalWork(int threadId, Spike& spike)
 {
-    // Try to get work from this thread's own queue
-    if (threadId >= 0 && threadId < static_cast<int>(threadQueues.size())) {
-        if (threadQueues[threadId]->pop(spike)) {
-            return true;
-        }
+    // Make sure thread ID is valid
+    if (threadId < 0 || threadId >= static_cast<int>(threadQueues.size())) {
+        return false;
     }
-    return false;
+    
+    // Try to get work from the thread's local queue
+    return threadQueues[threadId]->pop(spike);
 }
 
 bool SpikeQueue::stealWork(int threadId, Spike& spike)
@@ -254,6 +270,9 @@ void SpikeQueue::startProcessing(std::vector<std::shared_ptr<NeuronNode>>* nodes
     terminated.store(false);
     hasConverged.store(false);
     
+    // Reset idle confirmations counter
+    system_idle_confirmations.store(0);
+    
     // Set processing flag
     processing.store(true);
     
@@ -283,6 +302,14 @@ void SpikeQueue::startProcessing(std::vector<std::shared_ptr<NeuronNode>>* nodes
         }
     }
     
+    // Clear the global queue
+    {
+        std::lock_guard<std::mutex> lock(globalQueueMutex);
+        while (!globalQueue.empty()) {
+            globalQueue.pop();
+        }
+    }
+    
     // Start the worker threads
     workerThreads.clear();
     for (int i = 0; i < numThreads; i++) {
@@ -290,15 +317,25 @@ void SpikeQueue::startProcessing(std::vector<std::shared_ptr<NeuronNode>>* nodes
     }
     
     std::cout << "NSGS: Started " << numThreads << " worker threads with lock-free work-stealing" << std::endl;
+    
+    // Notify any waiting threads
+    idle_condition_var.notify_all();
 }
 
 void SpikeQueue::stopProcessing()
 {
+    // If not processing, do nothing
+    if (!processing.load()) {
+        return;
+    }
+    
+    std::cout << "NSGS: Stopping processing..." << std::endl;
+    
     // Set termination flag
     terminated.store(true);
     
     // Wake up any waiting threads
-    globalQueueCondition.notify_all();
+    idle_condition_var.notify_all();
     terminationCondition.notify_all();
     
     // Wait for all threads to finish
@@ -316,6 +353,8 @@ void SpikeQueue::stopProcessing()
     
     // Clear worker threads
     workerThreads.clear();
+    
+    std::cout << "NSGS: All worker threads stopped. Total spikes processed: " << processedSpikeCount.load() << std::endl;
 }
 
 void SpikeQueue::clear()
@@ -619,77 +658,137 @@ void SpikeQueue::processSingleSpike(const Spike& spike)
 // Worker thread function - each thread in the pool runs this
 void SpikeQueue::workerThreadFunction(int threadId)
 {
-    // Set thread-local ID for work stealing
+    // For early termination detection
+    bool is_local_idle = false;
+    int consecutive_idle_checks = 0;
+    const int max_idle_threshold = 5;
+    
+    // Set thread-local ID
     threadLocalId = threadId;
     
-    // Record that this worker is active
+    // Record this thread is now active
     activeWorkers.fetch_add(1);
     
-    std::cout << "NSGS: Worker thread " << threadId << " started" << std::endl;
+    // Seed random generator uniquely per thread
+    std::random_device rd;
+    std::mt19937 gen(rd() + threadId);  // Use thread ID to get different seeds
     
-    // Work processing loop
-    while (!terminated.load() && !hasConverged.load()) {
-        Spike spike(-1, -1, 0.0f);
-        bool hasWork = false;
+    // Main processing loop
+    while (!terminated.load()) {
+        Spike spike;
+        bool got_work = false;
         
-        // Work stealing approach: try local queue first, then steal, then global queue
-        
-        // 1. Try to get work from local queue
-        if (threadId >= 0 && threadId < static_cast<int>(threadQueues.size())) {
-            hasWork = threadQueues[threadId]->pop(spike);
-        }
-        
-        // 2. If no local work, try to steal from other workers
-        if (!hasWork) {
-            hasWork = stealWork(threadId, spike);
-        }
-        
-        // 3. If no work was stolen, try the global queue
-        if (!hasWork) {
-            hasWork = getGlobalWork(spike);
-        }
-        
-        if (hasWork) {
-            // Process the spike
-            processSingleSpike(spike);
+        // Try to get work from different sources in priority order
+        if (getLocalWork(threadId, spike)) {
+            // Process spike from local queue
+            got_work = true;
+            is_local_idle = false;
+            consecutive_idle_checks = 0;
+        } else if (getGlobalWork(spike)) {
+            // Process spike from global queue
+            got_work = true;
+            is_local_idle = false;
+            consecutive_idle_checks = 0;
+        } else if (stealWork(threadId, spike)) {
+            // Process spike stolen from another thread
+            got_work = true;
+            is_local_idle = false;
+            consecutive_idle_checks = 0;
         } else {
-            // No work available
+            // No work found, thread is idle
+            is_local_idle = true;
+            consecutive_idle_checks++;
             
-            // Check if we have any work across all queues
-            if (isEmpty()) {
-                // Update activity state and check for inactivity-based convergence
-                updateActivity();
+            // First idle thread checks if all threads are idle and queues are empty for early termination
+            if (threadId == 0 && consecutive_idle_checks >= max_idle_threshold) {
+                bool all_queues_empty = true;
                 
-                if (!hasRecentActivity.load()) {
-                    // Check for convergence explicitly
-                    if (checkConvergence()) {
-                        hasConverged.store(true);
-                        terminationCondition.notify_all();
-                        break;
-                    }
+                // Check if global queue is empty
+                {
+                    std::lock_guard<std::mutex> lock(globalQueueMutex);
+                    all_queues_empty = globalQueue.empty();
                 }
                 
-                // Wait for more work or termination with a short timeout
-                std::unique_lock<std::mutex> lock(terminationMutex);
-                terminationCondition.wait_for(lock, std::chrono::milliseconds(10), [this]{
-                    return !isEmpty() || terminated.load() || hasConverged.load();
-                });
-            } else {
-                // There's work somewhere, just yield to let other threads run
-                std::this_thread::yield();
+                // Only continue if global queue is empty
+                if (all_queues_empty) {
+                    // Check all thread queues
+                    for (const auto& queue : threadQueues) {
+                        if (!queue->isEmpty()) {
+                            all_queues_empty = false;
+                            break;
+                        }
+                    }
+                    
+                    // If all queues are empty, increment system idle confirmation counter
+                    if (all_queues_empty) {
+                        system_idle_confirmations.fetch_add(1);
+                        std::cout << "NSGS SpikeQueue: Idle confirmation count: " 
+                                  << system_idle_confirmations.load() << std::endl;
+                        
+                        // If we've confirmed multiple times, prepare for termination
+                        if (system_idle_confirmations.load() >= 3) {
+                            std::cout << "NSGS SpikeQueue: System idle confirmed, preparing for termination" << std::endl;
+                            hasConverged.store(true);
+                            terminated.store(true);
+                            globalQueueCondition.notify_all();
+                            terminationCondition.notify_all();
+                            break;
+                        }
+                    } else {
+                        // Reset counter if any queue has work
+                        system_idle_confirmations.store(0);
+                    }
+                } else {
+                    // Reset counter if global queue has work
+                    system_idle_confirmations.store(0);
+                }
             }
         }
         
-        // Check thermal adaptation and convergence (only thread 0 does this)
-        if (threadId == 0) {
-            checkThermalAdaptation();
+        // Process the spike if we got one
+        if (got_work) {
+            processSingleSpike(spike);
+            
+            // Update stats
+            processedSpikeCount.fetch_add(1);
+            
+            // Check if we should adapt to thermal load (only thread 0 does this)
+            if (threadId == 0 && processedSpikeCount.load() % 100 == 0) {
+                checkThermalAdaptation();
+            }
+        } else {
+            // Enter "idle" state, notifying others we're available for stealing
+            {
+                std::unique_lock<std::mutex> lock(idle_mutex);
+                idle_condition_var.wait_for(lock, std::chrono::milliseconds(5));
+            }
+            
+            // Periodically check convergence (much more often for thread 0)
+            if ((threadId == 0 && consecutive_idle_checks % 2 == 0) || 
+                consecutive_idle_checks % 10 == 0) {
+                
+                if (checkConvergence() || hasConverged.load()) {
+                    // Wake up all threads to check termination condition
+                    terminationCondition.notify_all();
+                }
+            }
+            
+            // Periodically check for termination
+            if (consecutive_idle_checks % 20 == 0) {
+                std::unique_lock<std::mutex> lock(terminationMutex);
+                if (terminationCondition.wait_for(lock, std::chrono::milliseconds(1), 
+                    [this]() { return terminated.load() || hasConverged.load(); })) {
+                    // Termination condition met
+                    break;
+                }
+            }
         }
     }
     
-    // Worker is exiting
+    // Record that this thread is now inactive
     activeWorkers.fetch_sub(1);
     
-    std::cout << "NSGS: Worker thread " << threadId << " terminated" << std::endl;
+    std::cout << "NSGS: Worker thread " << threadId << " terminating" << std::endl;
 }
 
 void SpikeQueue::registerNodeEdgeStrength(int nodeId, float edgeStrength) {
@@ -748,4 +847,23 @@ float SpikeQueue::calculateSpikePriority(int sourceNodeId, int targetNodeId, flo
     }
     
     return priority;
+}
+
+bool SpikeQueue::anyOtherThreadHasWork(int current_thread_id) {
+    // Check global queue first (more likely to have broad work)
+    {
+        std::lock_guard<std::mutex> lock(globalQueueMutex);
+        if (!globalQueue.empty()) {
+            return true;
+        }
+    }
+
+    // Check other threads' local queues
+    for (int i = 0; i < numThreads; ++i) {
+        if (i == current_thread_id) continue;
+        if (threadQueues[i] && !threadQueues[i]->isEmpty()) {
+            return true;
+        }
+    }
+    return false;
 } 

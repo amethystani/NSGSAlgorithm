@@ -227,7 +227,7 @@ yolov8_ort: /opt/homebrew/lib/libopencv_wechat_qrcode.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_xfeatures2d.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_xobjdetect.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_xphoto.4.11.0.dylib
-yolov8_ort: ../onnxruntime-osx-arm64-1.15.0/lib/libonnxruntime.dylib
+yolov8_ort: /Users/animesh/PCPPROJECT/Backend/onnxruntime-osx-arm64-1.15.0/lib/libonnxruntime.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_shape.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_highgui.4.11.0.dylib
 yolov8_ort: /opt/homebrew/lib/libopencv_datasets.4.11.0.dylib

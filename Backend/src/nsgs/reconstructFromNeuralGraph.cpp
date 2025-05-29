@@ -3,10 +3,15 @@
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
+#include <chrono>  // Add for timeout support
 
 // Enhanced reconstruction from neural graph using spatial clustering
 cv::Mat NsgsPredictor::reconstructFromNeuralGraph()
 {
+    // Start timing for timeout mechanism
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto timeout = startTime + std::chrono::seconds(5); // 5-second timeout
+    
     // Create a blank mask image
     int width = (int)this->inputShapes[0][3];
     int height = (int)this->inputShapes[0][2];
@@ -19,12 +24,24 @@ cv::Mat NsgsPredictor::reconstructFromNeuralGraph()
         if (classId >= 0) {
             classNodes[classId].push_back(node);
         }
+        
+        // Check for timeout
+        if (std::chrono::high_resolution_clock::now() > timeout) {
+            std::cout << "NSGS: Timeout during node classification collection, returning partial results" << std::endl;
+            return mask;
+        }
     }
     
     std::cout << "NSGS: Reconstructing segmentation with " << classNodes.size() << " classes" << std::endl;
     
     // For each class, perform spatial clustering of nodes
     for (auto &classPair : classNodes) {
+        // Check for timeout
+        if (std::chrono::high_resolution_clock::now() > timeout) {
+            std::cout << "NSGS: Timeout during class processing, returning partial results" << std::endl;
+            return mask;
+        }
+        
         int classId = classPair.first;
         auto &nodes = classPair.second;
         
@@ -47,6 +64,12 @@ cv::Mat NsgsPredictor::reconstructFromNeuralGraph()
         int nextClusterId = 0;
         
         for (size_t i = 0; i < nodes.size(); i++) {
+            // Check for timeout
+            if (std::chrono::high_resolution_clock::now() > timeout) {
+                std::cout << "NSGS: Timeout during clustering, returning partial results" << std::endl;
+                return mask;
+            }
+            
             // Skip nodes already assigned to clusters
             if (nodeClusterIds[i] >= 0) continue;
             
@@ -57,6 +80,12 @@ cv::Mat NsgsPredictor::reconstructFromNeuralGraph()
             
             // BFS expansion to find connected nodes
             while (!queue.empty()) {
+                // Check for timeout
+                if (std::chrono::high_resolution_clock::now() > timeout) {
+                    std::cout << "NSGS: Timeout during BFS expansion, returning partial results" << std::endl;
+                    return mask;
+                }
+                
                 size_t currentIdx = queue.front();
                 queue.pop();
                 
@@ -94,6 +123,12 @@ cv::Mat NsgsPredictor::reconstructFromNeuralGraph()
         
         // For each valid cluster, generate a concave hull and fill it
         for (int clusterId = 0; clusterId < nextClusterId; clusterId++) {
+            // Check for timeout
+            if (std::chrono::high_resolution_clock::now() > timeout) {
+                std::cout << "NSGS: Timeout during hull generation, returning partial results" << std::endl;
+                return mask;
+            }
+            
             // Collect points for this cluster
             std::vector<cv::Point> clusterPoints;
             for (size_t i = 0; i < nodes.size(); i++) {
@@ -136,10 +171,20 @@ cv::Mat NsgsPredictor::reconstructFromNeuralGraph()
         }
     }
     
+    // Check for timeout before morphological operations
+    if (std::chrono::high_resolution_clock::now() > timeout) {
+        std::cout << "NSGS: Timeout before final cleanup, returning raw mask" << std::endl;
+        return mask;
+    }
+    
     // Apply morphological operations to clean up the mask
     cv::Mat cleanMask;
     cv::Mat element = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
     cv::morphologyEx(mask, cleanMask, cv::MORPH_CLOSE, element);
+    
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - startTime).count() / 1000.0;
+    std::cout << "NSGS: Reconstruction completed in " << elapsed << " seconds" << std::endl;
     
     return cleanMask;
 } 

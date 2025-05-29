@@ -4,7 +4,7 @@
 # compile CXX with /Library/Developer/CommandLineTools/usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/Users/animesh/PCPPROJECT/Backend/include -I/Users/animesh/PCPPROJECT/Backend/src -I/Users/animesh/PCPPROJECT/Backend/build/../onnxruntime-osx-arm64-1.15.0/include -isystem /opt/homebrew/Cellar/opencv/4.11.0_1/include/opencv4
+CXX_INCLUDES = -I/Users/animesh/PCPPROJECT/Backend/include -I/Users/animesh/PCPPROJECT/Backend/src -I/Users/animesh/PCPPROJECT/Backend/onnxruntime-osx-arm64-1.15.0/include -isystem /opt/homebrew/Cellar/opencv/4.11.0_1/include/opencv4
 
 CXX_FLAGSarm64 = -g -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk
 

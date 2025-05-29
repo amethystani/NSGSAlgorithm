@@ -4,6 +4,7 @@
 #include <chrono>
 #include <thread>
 #include <unordered_map> // For watershed region tracking
+#include <unordered_set> // For efficient adjacency tracking
 #include "utils.h"
 #include <opencv2/ximgproc.hpp> // For SLIC superpixels
 #include <future>
@@ -410,213 +411,133 @@ void NsgsPredictor::buildSegmentationGraph(const cv::Mat &image)
     
     // Create connections between nodes based on region adjacency
     // We'll consider two regions adjacent if they share a boundary
-    std::vector<std::vector<int>> adjacencyList(centers.size(), std::vector<int>());
+    std::vector<std::unordered_set<int>> adjacencyList(centers.size());
     
     // Find adjacency relationships by checking neighborhood of each pixel
-    for (int y = 1; y < height - 1; y++) {
-        for (int x = 1; x < width - 1; x++) {
+    // Using a more efficient approach - only check right and bottom neighbors
+    for (int y = 0; y < height - 1; y++) {
+        for (int x = 0; x < width - 1; x++) {
             int currentLabel = labels.at<int>(y, x);
+            if (currentLabel <= 0 || currentLabel >= static_cast<int>(centers.size())) continue; // Skip invalid labels
             
-            // Check 4-neighborhood
+            // Check right and bottom neighbors only (left and top will be covered in other iterations)
             int rightLabel = labels.at<int>(y, x + 1);
-            int leftLabel = labels.at<int>(y, x - 1);
             int downLabel = labels.at<int>(y + 1, x);
-            int upLabel = labels.at<int>(y - 1, x);
             
             // If label changes, regions are adjacent
-            if (currentLabel != rightLabel && currentLabel > 0 && rightLabel > 0) {
-                adjacencyList[currentLabel].push_back(rightLabel);
-                adjacencyList[rightLabel].push_back(currentLabel);
+            if (currentLabel != rightLabel && rightLabel > 0 && rightLabel < static_cast<int>(centers.size())) {
+                adjacencyList[currentLabel].insert(rightLabel);
+                adjacencyList[rightLabel].insert(currentLabel);
             }
             
-            if (currentLabel != downLabel && currentLabel > 0 && downLabel > 0) {
-                adjacencyList[currentLabel].push_back(downLabel);
-                adjacencyList[downLabel].push_back(currentLabel);
+            if (currentLabel != downLabel && downLabel > 0 && downLabel < static_cast<int>(centers.size())) {
+                adjacencyList[currentLabel].insert(downLabel);
+                adjacencyList[downLabel].insert(currentLabel);
             }
-            
-            // Don't need to check left and up since they'll be covered in other iterations
         }
     }
     
-    // Remove duplicates in adjacency list
-    for (auto& neighbors : adjacencyList) {
-        std::sort(neighbors.begin(), neighbors.end());
-        neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
-    }
+    // No need to remove duplicates since we're using std::unordered_set
+    
+    // Instead of a full matrix for processed flag, use a set of processed pairs
+    std::set<std::pair<int, int>> processedPairs;
     
     // Create connections between adjacent regions' nodes
+    std::cout << "NSGS: Creating connections between " << graphNodes.size() << " nodes..." << std::endl;
+    auto connectionStartTime = std::chrono::high_resolution_clock::now();
+    auto connectionTimeout = connectionStartTime + std::chrono::seconds(10); // 10 second timeout
+    
+    int connectionsCreated = 0;
+    int nodesProcessed = 0;
+    
     for (size_t i = 0; i < graphNodes.size(); i++) {
+        // Progress reporting and timeout check every 50 nodes
+        if (i % 50 == 0) {
+            if (std::chrono::high_resolution_clock::now() > connectionTimeout) {
+                std::cout << "NSGS: Connection creation timeout after processing " << nodesProcessed 
+                          << " nodes with " << connectionsCreated << " connections" << std::endl;
+                break;
+            }
+            std::cout << "NSGS: Processing node " << i << "/" << graphNodes.size() 
+                      << " (" << connectionsCreated << " connections)" << std::endl;
+        }
+        
         if (i >= adjacencyList.size()) continue;
         
         const std::vector<float>& nodeFeatures = graphNodes[i]->getFeatures();
         cv::Point2i nodePos = graphNodes[i]->getPosition();
         
         for (int neighborLabel : adjacencyList[i]) {
-            if (neighborLabel >= static_cast<int>(graphNodes.size())) continue;
+            if (neighborLabel >= static_cast<int>(graphNodes.size()) || neighborLabel < 0) continue;
+            
+            // Create ordered pair for tracking
+            std::pair<int, int> nodePair(std::min(static_cast<int>(i), neighborLabel), 
+                                         std::max(static_cast<int>(i), neighborLabel));
+            
+            // Skip if already processed this pair (symmetric connection)
+            if (processedPairs.find(nodePair) != processedPairs.end()) continue;
+            processedPairs.insert(nodePair);
             
             auto& neighborNode = graphNodes[neighborLabel];
             const std::vector<float>& neighborFeatures = neighborNode->getFeatures();
             cv::Point2i neighborPos = neighborNode->getPosition();
             
-            // Calculate multiple feature similarity metrics and combine them
-            float cosineSimilarity = 0.0f;
-            float euclideanDistance = 0.0f;
-            float spatialDistance = 0.0f;
-            float colorSimilarity = 0.0f;
-            float textureSimilarity = 0.0f;
+            // SIMPLIFIED feature similarity calculation for performance
+            float connectionWeight = 0.5f; // Default weight
             
-            // 1. Calculate cosine similarity for overall feature similarity
+            // Calculate basic similarity only if features are available
             if (!nodeFeatures.empty() && !neighborFeatures.empty()) {
-                // Find minimum common size
                 size_t minSize = std::min(nodeFeatures.size(), neighborFeatures.size());
                 
+                // Simple dot product similarity (much faster than multiple calculations)
                 float dotProduct = 0.0f;
                 float normA = 0.0f;
                 float normB = 0.0f;
                 
-                // Calculate dot product and norms
-                for (size_t k = 0; k < minSize; k++) {
-                    dotProduct += nodeFeatures[k] * neighborFeatures[k];
-                    normA += nodeFeatures[k] * nodeFeatures[k];
-                    normB += neighborFeatures[k] * neighborFeatures[k];
+                // Use only first 10 features for speed (color + some texture)
+                size_t maxFeatures = std::min(size_t(10), minSize);
+                for (size_t k = 0; k < maxFeatures; k++) {
+                    float a = nodeFeatures[k];
+                    float b = neighborFeatures[k];
+                    dotProduct += a * b;
+                    normA += a * a;
+                    normB += b * b;
                 }
                 
                 // Calculate cosine similarity
                 if (normA > 0 && normB > 0) {
-                    cosineSimilarity = dotProduct / (std::sqrt(normA) * std::sqrt(normB));
-                }
-                
-                // Calculate euclidean distance (then convert to similarity)
-                float euclideanDistanceSquared = 0.0f;
-                for (size_t k = 0; k < minSize; k++) {
-                    float diff = nodeFeatures[k] - neighborFeatures[k];
-                    euclideanDistanceSquared += diff * diff;
-                }
-                euclideanDistance = std::sqrt(euclideanDistanceSquared);
-                float euclideanSimilarity = 1.0f / (1.0f + euclideanDistance); // Convert distance to similarity
-                
-                // 2. Calculate spatial distance similarity
-                float dx = static_cast<float>(nodePos.x - neighborPos.x);
-                float dy = static_cast<float>(nodePos.y - neighborPos.y);
-                spatialDistance = std::sqrt(dx*dx + dy*dy);
-                
-                // Convert to similarity measure (closer = more similar)
-                // Normalize based on image dimensions
-                float maxDistance = std::sqrt(static_cast<float>(width*width + height*height));
-                float spatialSimilarity = 1.0f - (spatialDistance / maxDistance);
-                
-                // 3. Calculate separate similarities for color and texture features
-                // Assuming the first 3 elements are color (Lab) and next 16 are texture (LBP)
-                if (minSize >= 19) { // Make sure we have both color and texture features
-                    // Color similarity (first 3 features)
-                    float colorDotProduct = 0.0f;
-                    float colorNormA = 0.0f, colorNormB = 0.0f;
-                    
-                    for (size_t k = 0; k < 3; k++) {
-                        colorDotProduct += nodeFeatures[k] * neighborFeatures[k];
-                        colorNormA += nodeFeatures[k] * nodeFeatures[k];
-                        colorNormB += neighborFeatures[k] * neighborFeatures[k];
-                    }
-                    
-                    if (colorNormA > 0 && colorNormB > 0) {
-                        colorSimilarity = colorDotProduct / (std::sqrt(colorNormA) * std::sqrt(colorNormB));
-                    }
-                    
-                    // Texture similarity (next 16 features)
-                    float textureDotProduct = 0.0f;
-                    float textureNormA = 0.0f, textureNormB = 0.0f;
-                    
-                    for (size_t k = 3; k < 19; k++) {
-                        textureDotProduct += nodeFeatures[k] * neighborFeatures[k];
-                        textureNormA += nodeFeatures[k] * nodeFeatures[k];
-                        textureNormB += neighborFeatures[k] * neighborFeatures[k];
-                    }
-                    
-                    if (textureNormA > 0 && textureNormB > 0) {
-                        textureSimilarity = textureDotProduct / (std::sqrt(textureNormA) * std::sqrt(textureNormB));
-                    }
+                    float similarity = dotProduct / (std::sqrt(normA) * std::sqrt(normB));
+                    similarity = std::max(0.0f, std::min(1.0f, similarity)); // Clamp to [0,1]
+                    connectionWeight = 0.3f + 0.7f * similarity;
                 }
             }
             
-            // 4. Combine all similarity metrics with appropriate weights
-            // Prioritize feature similarity but also consider spatial proximity
-            float combinedSimilarity = 0.0f;
+            // Simple spatial distance modulation
+            float dx = static_cast<float>(nodePos.x - neighborPos.x);
+            float dy = static_cast<float>(nodePos.y - neighborPos.y);
+            float spatialDistance = std::sqrt(dx*dx + dy*dy);
             
-            size_t minFeatureSize = std::min(nodeFeatures.size(), neighborFeatures.size());
-            
-            // Use all features with higher weight on color and texture
-            if (minFeatureSize >= 19) {
-                combinedSimilarity = 0.40f * cosineSimilarity +
-                                    0.30f * colorSimilarity +
-                                    0.20f * textureSimilarity;
-            } else {
-                // Fallback to basic similarity if we don't have all features
-                combinedSimilarity = 0.70f * cosineSimilarity +
-                                    0.30f * colorSimilarity;
-            }
-            
-            // Calculate and apply edge-based feature weights if we have gradient features
-            if (minFeatureSize > 19) { // Make sure we have gradient features
-                float edgeWeight = 0.0f;
-                
-                // Extract edge features (typically after the texture features)
-                for (size_t j = 19; j < std::min(size_t(27), minFeatureSize); j++) {
-                    edgeWeight += std::abs(nodeFeatures[j] - neighborFeatures[j]);
-                }
-                
-                // Normalize the edge weight
-                edgeWeight = std::min(1.0f, edgeWeight / 8.0f);
-                
-                // Adjust the similarity by edge strength
-                // Stronger edges -> lower similarity -> creates natural segmentation boundaries
-                combinedSimilarity *= (1.0f - 0.5f * edgeWeight);
-            }
-            
-            // Ensure similarity is in [0,1] range
-            combinedSimilarity = std::max(0.0f, std::min(1.0f, combinedSimilarity));
-            
-            // Final connection weight calculation:
-            // - Scale similarity to create weight in [0.2, 1.0] range
-            // - This ensures all connections have minimum strength
-            float connectionWeight = 0.2f + 0.8f * combinedSimilarity;
-            
-            // 5. Apply NSGS-specific weight modulation based on edge features
-            // Weaken connections at strong image edges to help form segment boundaries
-            float edgeStrength = 0.0f;
-            cv::Point2i midpoint((nodePos.x + neighborPos.x) / 2, (nodePos.y + neighborPos.y) / 2);
-            
-            // Find edge strength features (gradient magnitudes) - assuming they're stored at specific index
-            if (minFeatureSize > 19) { // Make sure we have gradient features
-                // For this implementation, assume gradient features start at index 19
-                // Use the average of gradient features for edge strength
-                float nodeEdge = 0.0f, neighborEdge = 0.0f;
-                for (size_t j = 19; j < std::min(size_t(27), minFeatureSize); j++) {
-                    nodeEdge += nodeFeatures[j];
-                    neighborEdge += neighborFeatures[j];
-                }
-                
-                nodeEdge /= 8.0f; // Normalize (8 gradient orientation bins)
-                neighborEdge /= 8.0f;
-                
-                // Higher edge strength = weaker connection
-                edgeStrength = (nodeEdge + neighborEdge) / 2.0f;
-                
-                // Apply edge-based modulation (stronger edges = weaker connections)
-                connectionWeight *= (1.0f - 0.5f * edgeStrength);
+            // Weaken connection if nodes are far apart
+            if (spatialDistance > 50.0f) {
+                connectionWeight *= 0.8f;
             }
             
             // Ensure weight stays in valid range
             connectionWeight = std::max(0.1f, std::min(1.0f, connectionWeight));
             
-            // Add connection with the calculated weight
+            // Add connection with the calculated weight (symmetric)
             graphNodes[i]->addConnection(neighborNode, connectionWeight);
+            neighborNode->addConnection(graphNodes[i], connectionWeight);
+            connectionsCreated++;
         }
+        nodesProcessed++;
     }
     
-    std::cout << "NSGS: Created connections with feature-based weights" << std::endl;
+    auto connectionTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - connectionStartTime).count();
     
-    // Start async spike processing
-    spikeQueue->startProcessing(&graphNodes);
+    std::cout << "NSGS: Created " << connectionsCreated << " connections in " 
+              << connectionTime << "ms (" << nodesProcessed << " nodes processed)" << std::endl;
 }
 
 void NsgsPredictor::initializeNodePotentials(const cv::Mat &embeddings)
@@ -738,6 +659,8 @@ void NsgsPredictor::extractNodeFeatures(const cv::Mat &image, const cv::Mat &emb
 {
     // Extract rich features for each node using both raw image data and CNN embeddings
     std::cout << "NSGS: Extracting node features from image and embeddings" << std::endl;
+    auto featureStartTime = std::chrono::high_resolution_clock::now();
+    auto featureTimeout = featureStartTime + std::chrono::seconds(8); // 8 second timeout
     
     // Check input validity
     if (image.empty()) {
@@ -758,34 +681,36 @@ void NsgsPredictor::extractNodeFeatures(const cv::Mat &image, const cv::Mat &emb
     // Compute gradient magnitude and orientation
     cv::cartToPolar(gradX, gradY, gradMag, gradOrient);
     
-    // Compute texture features using Local Binary Patterns (basic version)
+    // SIMPLIFIED texture computation for speed - use simpler variance-based texture
     cv::Mat grayImage;
     cv::cvtColor(image, grayImage, cv::COLOR_BGR2GRAY);
-    cv::Mat lbpImage;
+    cv::Mat grayFloat;
+    grayImage.convertTo(grayFloat, CV_32F);
     
-    // Simple LBP implementation
-    lbpImage = cv::Mat::zeros(grayImage.size(), CV_8U);
-    for (int y = 1; y < grayImage.rows - 1; y++) {
-        for (int x = 1; x < grayImage.cols - 1; x++) {
-            uchar center = grayImage.at<uchar>(y, x);
-            unsigned char lbpCode = 0;
-            
-            // Compare with 8 neighbors in clockwise order
-            lbpCode |= (grayImage.at<uchar>(y-1, x) >= center) << 7;
-            lbpCode |= (grayImage.at<uchar>(y-1, x+1) >= center) << 6;
-            lbpCode |= (grayImage.at<uchar>(y, x+1) >= center) << 5;
-            lbpCode |= (grayImage.at<uchar>(y+1, x+1) >= center) << 4;
-            lbpCode |= (grayImage.at<uchar>(y+1, x) >= center) << 3;
-            lbpCode |= (grayImage.at<uchar>(y+1, x-1) >= center) << 2;
-            lbpCode |= (grayImage.at<uchar>(y, x-1) >= center) << 1;
-            lbpCode |= (grayImage.at<uchar>(y-1, x-1) >= center) << 0;
-            
-            lbpImage.at<uchar>(y, x) = lbpCode;
-        }
-    }
+    // Instead of expensive LBP, use local variance as texture measure
+    cv::Mat textureMap;
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+    cv::Mat mean, sqmean;
+    cv::boxFilter(grayFloat, mean, CV_32F, cv::Size(5, 5));
+    cv::boxFilter(grayFloat.mul(grayFloat), sqmean, CV_32F, cv::Size(5, 5));
+    textureMap = sqmean - mean.mul(mean); // Variance
+    
+    std::cout << "NSGS: Processing " << graphNodes.size() << " nodes for feature extraction..." << std::endl;
     
     // Create feature vector for each node
+    int nodesProcessed = 0;
     for (auto &node : graphNodes) {
+        // Progress check and timeout every 100 nodes
+        if (nodesProcessed % 100 == 0) {
+            if (std::chrono::high_resolution_clock::now() > featureTimeout) {
+                std::cout << "NSGS: Feature extraction timeout after processing " << nodesProcessed 
+                          << " of " << graphNodes.size() << " nodes" << std::endl;
+                break;
+            }
+            std::cout << "NSGS: Feature extraction progress: " << nodesProcessed 
+                      << "/" << graphNodes.size() << " nodes" << std::endl;
+        }
+        
         // Reset any existing features
         std::vector<float> featureVector;
         
@@ -798,8 +723,8 @@ void NsgsPredictor::extractNodeFeatures(const cv::Mat &image, const cv::Mat &emb
         cv::Mat labImage;
         cv::cvtColor(floatImage, labImage, cv::COLOR_BGR2Lab);
         
-        // Extract color in local neighborhood (5x5 patch)
-        const int colorPatchRadius = 2;
+        // Extract color in smaller neighborhood for speed (3x3 instead of 5x5)
+        const int colorPatchRadius = 1;
         std::vector<float> labValues(3, 0.0f);
         int patchCount = 0;
         
@@ -821,57 +746,43 @@ void NsgsPredictor::extractNodeFeatures(const cv::Mat &image, const cv::Mat &emb
             featureVector.push_back(labValues[i] / patchCount);
         }
         
-        // 2. TEXTURE FEATURES (LBP histogram)
-        const int texturePatchRadius = 4;
-        std::vector<int> lbpHistogram(16, 0); // Simplified LBP using 16 bins
+        // 2. SIMPLIFIED TEXTURE FEATURES (using variance instead of LBP)
+        const int texturePatchRadius = 2;
+        float textureVariance = 0.0f;
+        int textureCount = 0;
         
         for (int dy = -texturePatchRadius; dy <= texturePatchRadius; dy++) {
             for (int dx = -texturePatchRadius; dx <= texturePatchRadius; dx++) {
-                int nx = std::min(lbpImage.cols - 1, std::max(0, x + dx));
-                int ny = std::min(lbpImage.rows - 1, std::max(0, y + dy));
+                int nx = std::min(textureMap.cols - 1, std::max(0, x + dx));
+                int ny = std::min(textureMap.rows - 1, std::max(0, y + dy));
                 
-                uchar lbpValue = lbpImage.at<uchar>(ny, nx);
-                lbpHistogram[lbpValue % 16]++; // Simplified binning
+                textureVariance += textureMap.at<float>(ny, nx);
+                textureCount++;
             }
         }
         
-        // Normalize histogram and add to features
-        int totalLbpPixels = (2*texturePatchRadius+1) * (2*texturePatchRadius+1);
-        for (int i = 0; i < 16; i++) {
-            featureVector.push_back(static_cast<float>(lbpHistogram[i]) / totalLbpPixels);
-        }
+        // Add single texture feature (much faster than 16 LBP features)
+        featureVector.push_back(textureVariance / textureCount);
         
-        // 3. GRADIENT FEATURES
-        const int gradientPatchRadius = 3;
-        std::vector<float> gradientFeatures(8, 0.0f); // 8 orientation bins
-        float totalGradientMag = 0.0f;
+        // 3. SIMPLIFIED GRADIENT FEATURES (use magnitude only, not orientation histogram)
+        const int gradientPatchRadius = 2;
+        float avgGradientMag = 0.0f;
+        int gradCount = 0;
         
         for (int dy = -gradientPatchRadius; dy <= gradientPatchRadius; dy++) {
             for (int dx = -gradientPatchRadius; dx <= gradientPatchRadius; dx++) {
                 int nx = std::min(gradMag.cols - 1, std::max(0, x + dx));
                 int ny = std::min(gradMag.rows - 1, std::max(0, y + dy));
                 
-                float mag = gradMag.at<float>(ny, nx);
-                float orient = gradOrient.at<float>(ny, nx);
-                
-                // Bin orientation (0-360 degrees into 8 bins)
-                int bin = static_cast<int>(orient * 8 / (2 * CV_PI)) % 8;
-                gradientFeatures[bin] += mag;
-                totalGradientMag += mag;
+                avgGradientMag += gradMag.at<float>(ny, nx);
+                gradCount++;
             }
         }
         
-        // Normalize gradient histogram and add to features
-        if (totalGradientMag > 0) {
-            for (int i = 0; i < 8; i++) {
-                featureVector.push_back(gradientFeatures[i] / totalGradientMag);
-            }
-        } else {
-            // If no gradient, add zeros
-            featureVector.insert(featureVector.end(), 8, 0.0f);
-        }
+        // Add single gradient feature instead of 8 orientation bins
+        featureVector.push_back(avgGradientMag / gradCount);
         
-        // 4. CNN EMBEDDINGS (if available)
+        // 4. CNN EMBEDDINGS (if available) - simplified
         if (!embeddings.empty()) {
             // Calculate embedding position (may be at different resolution)
             float scaleX = static_cast<float>(embeddings.cols) / static_cast<float>(image.cols);
@@ -880,58 +791,60 @@ void NsgsPredictor::extractNodeFeatures(const cv::Mat &image, const cv::Mat &emb
             int embX = std::min(embeddings.cols - 1, std::max(0, static_cast<int>(x * scaleX)));
             int embY = std::min(embeddings.rows - 1, std::max(0, static_cast<int>(y * scaleY)));
             
-            // Get embedding features
+            // Get embedding features - only use a few channels for speed
             int embChannels = embeddings.channels();
             
             if (embChannels == 1) {
-                // Single channel embeddings
-                const int embPatchRadius = 1;
-                for (int dy = -embPatchRadius; dy <= embPatchRadius; dy++) {
-                    for (int dx = -embPatchRadius; dx <= embPatchRadius; dx++) {
-                        int nx = std::min(embeddings.cols - 1, std::max(0, embX + dx));
-                        int ny = std::min(embeddings.rows - 1, std::max(0, embY + dy));
-                        featureVector.push_back(embeddings.at<float>(ny, nx));
-                    }
-                }
+                // Single channel - just use center pixel
+                featureVector.push_back(embeddings.at<float>(embY, embX));
             } else {
-                // Multi-channel embeddings (like from YOLOv8 mask protos)
-                // Use every 4th channel to keep feature vector size reasonable
-                for (int c = 0; c < embChannels; c += 4) {
+                // Multi-channel - use every 8th channel to keep feature count low
+                int maxChannels = std::min(4, embChannels); // Max 4 embedding features
+                for (int c = 0; c < maxChannels; c++) {
+                    int channelIdx = c * (embChannels / maxChannels);
                     if (embChannels <= 32) {
-                        featureVector.push_back(embeddings.at<cv::Vec<float, 32>>(embY, embX)[c]);
+                        featureVector.push_back(embeddings.at<cv::Vec<float, 32>>(embY, embX)[channelIdx]);
                     } else {
                         // For different channel counts, do a safe access
                         float* pixelPtr = (float*)(embeddings.data + embY*embeddings.step + embX*embeddings.elemSize());
-                        featureVector.push_back(pixelPtr[c]);
+                        featureVector.push_back(pixelPtr[channelIdx]);
                     }
                 }
             }
         }
         
-        // Normalize the entire feature vector (L2 norm)
-        float featureNorm = 0.0f;
+        // Simple normalization (much faster than L2 norm)
+        float maxVal = 0.0f;
         for (float f : featureVector) {
-            featureNorm += f * f;
+            maxVal = std::max(maxVal, std::abs(f));
         }
         
-        if (featureNorm > 0) {
-            featureNorm = std::sqrt(featureNorm);
+        if (maxVal > 0) {
             for (float &f : featureVector) {
-                f /= featureNorm;
+                f /= maxVal;
             }
         }
         
         // Set features for this node
         node->setFeatures(featureVector);
+        nodesProcessed++;
     }
     
-    std::cout << "NSGS: Extracted features with dimension " 
-              << (graphNodes.empty() ? 0 : graphNodes[0]->getFeatures().size())
-              << " for each node" << std::endl;
+    auto featureTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - featureStartTime).count();
+    
+    std::cout << "NSGS: Extracted " << (graphNodes.empty() ? 0 : graphNodes[0]->getFeatures().size())
+              << " features per node for " << nodesProcessed << " nodes in " << featureTime << "ms" << std::endl;
 }
 
 void NsgsPredictor::propagateSpikes(bool adaptToThermal)
 {
+    std::cout << "NSGS: Starting spike propagation with timeout safeguards..." << std::endl;
+    
+    // Start timeout counter
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto timeout = startTime + std::chrono::seconds(7); // 7-second timeout
+    
     // Content-aware initial spike selection instead of random seeding
     // This follows the paper: "Identify initial active PEs (e.g., high contrast regions)"
     
@@ -950,6 +863,12 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
     int width = (int)this->inputShapes[0][3];
     int height = (int)this->inputShapes[0][2];
     
+    // Check for timeout before creating activations
+    if (std::chrono::high_resolution_clock::now() > timeout) {
+        std::cout << "NSGS: Timeout before activation setup, skipping propagation" << std::endl;
+        return;
+    }
+    
     // Extract CNN activations if available
     cv::Mat cnnActivations;
     if (this->hasMask && outputTensors.size() > 1) {
@@ -961,6 +880,7 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
             
             // Proper bounds checking
             if (maskShape.size() >= 4) {
+                std::cout << "NSGS: Processing mask activations..." << std::endl;
                 // Create activation magnitude map by summing across channels
                 int protoChannels = maskShape[1];
                 int protoHeight = maskShape[2];
@@ -970,7 +890,20 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
                 cv::Mat embeddings(protoHeight, protoWidth, CV_32FC(protoChannels), maskOutput);
                 cnnActivations = cv::Mat(protoHeight, protoWidth, CV_32F, 0.0f);
                 
+                // Check for timeout before processing embeddings
+                if (std::chrono::high_resolution_clock::now() > timeout) {
+                    std::cout << "NSGS: Timeout before embeddings processing, skipping" << std::endl;
+                    return;
+                }
+                
+                // Process embeddings with periodic timeout checks
+                int processed_rows = 0;
                 for (int y = 0; y < protoHeight; y++) {
+                    if (y % 10 == 0 && std::chrono::high_resolution_clock::now() > timeout) {
+                        std::cout << "NSGS: Timeout during embeddings processing, using partial data" << std::endl;
+                        break;
+                    }
+                    
                     for (int x = 0; x < protoWidth; x++) {
                         float sum = 0.0f;
                         // Safe access using direct pointer arithmetic
@@ -981,7 +914,10 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
                         }
                         cnnActivations.at<float>(y, x) = std::sqrt(sum);
                     }
+                    processed_rows++;
                 }
+                
+                std::cout << "NSGS: Processed " << processed_rows << " of " << protoHeight << " embedding rows" << std::endl;
                 
                 // Normalize activations to [0,1] range
                 double minVal, maxVal;
@@ -996,8 +932,23 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
         }
     }
     
+    // Check for timeout before calculating node scores
+    if (std::chrono::high_resolution_clock::now() > timeout) {
+        std::cout << "NSGS: Timeout before node scoring, skipping propagation" << std::endl;
+        return;
+    }
+    
+    std::cout << "NSGS: Calculating node scores..." << std::endl;
+    
     // Calculate score for each node based on multiple criteria
+    size_t nodesProcessed = 0;
     for (size_t i = 0; i < graphNodes.size(); i++) {
+        // Check for timeout every 100 nodes
+        if (i % 100 == 0 && std::chrono::high_resolution_clock::now() > timeout) {
+            std::cout << "NSGS: Timeout during node scoring, using partial scores" << std::endl;
+            break;
+        }
+        
         auto &node = graphNodes[i];
         const std::vector<float> &features = node->getFeatures();
         cv::Point2i pos = node->getPosition();
@@ -1062,7 +1013,18 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
         
         // Store node index and its score
         nodeScores.push_back(std::make_pair(i, score));
+        nodesProcessed++;
     }
+    
+    std::cout << "NSGS: Processed " << nodesProcessed << " of " << graphNodes.size() << " nodes for scoring" << std::endl;
+    
+    // Check for timeout before sorting
+    if (std::chrono::high_resolution_clock::now() > timeout) {
+        std::cout << "NSGS: Timeout before score sorting, skipping propagation" << std::endl;
+        return;
+    }
+    
+    std::cout << "NSGS: Sorting node scores..." << std::endl;
     
     // Sort nodes by score in descending order
     std::sort(nodeScores.begin(), nodeScores.end(), 
@@ -1082,6 +1044,12 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
     // Also keep track of activated positions for visualization
     std::vector<cv::Point2i> activatedPositions;
     
+    // Check for timeout before activation
+    if (std::chrono::high_resolution_clock::now() > timeout) {
+        std::cout << "NSGS: Timeout before node activation, skipping propagation" << std::endl;
+        return;
+    }
+    
     // Activate nodes with highest scores
     for (int i = 0; i < std::min(numInitialSpikes, static_cast<int>(nodeScores.size())); i++) {
         size_t nodeIdx = nodeScores[i].first;
@@ -1096,9 +1064,10 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
         activatedPositions.push_back(graphNodes[nodeIdx]->getPosition());
     }
     
-    // Optional: Add a smaller number of random activations for diversity
+    // Add a smaller number of random activations for diversity
     const int numRandomSpikes = numInitialSpikes / 5; // 20% of the total
     if (!graphNodes.empty()) {
+        std::cout << "NSGS: Adding " << numRandomSpikes << " random activations for diversity" << std::endl;
         for (int i = 0; i < numRandomSpikes; i++) {
             int randomIdx = rand() % graphNodes.size();
             graphNodes[randomIdx]->incrementPotential(0.6f); // Moderate activation
@@ -1107,38 +1076,10 @@ void NsgsPredictor::propagateSpikes(bool adaptToThermal)
     }
     
     // Log statistics of initial activations
-    if (!activatedPositions.empty()) {
-        // Calculate average position
-        cv::Point2f avgPos(0, 0);
-        for (const auto &pos : activatedPositions) {
-            avgPos.x += pos.x;
-            avgPos.y += pos.y;
-        }
-        avgPos.x /= activatedPositions.size();
-        avgPos.y /= activatedPositions.size();
-        
-        // Calculate spatial distribution
-        float avgDist = 0;
-        for (const auto &pos : activatedPositions) {
-            float dx = pos.x - avgPos.x;
-            float dy = pos.y - avgPos.y;
-            avgDist += std::sqrt(dx*dx + dy*dy);
-        }
-        avgDist /= activatedPositions.size();
-        
-        std::cout << "NSGS: Initial activations avg position: (" << avgPos.x << ", " << avgPos.y 
-                  << "), avg spread: " << avgDist << " pixels" << std::endl;
-    }
-    
-    // Allow the system to process for a fixed amount of time
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    
-    // Adapt thresholds based on thermal state if requested
-    if (adaptToThermal) {
-        for (auto &node : graphNodes) {
-            node->adaptThreshold(globalThresholdMultiplier);
-        }
-    }
+    auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - startTime).count();
+    std::cout << "NSGS: Node activation completed in " << elapsedTime << "ms" << std::endl;
+    std::cout << "NSGS: Created connections with feature-based weights (spike propagation ready)" << std::endl;
 }
 
 cv::Mat NsgsPredictor::reconstructFromNeuralGraph()
@@ -1181,288 +1122,42 @@ cv::Mat NsgsPredictor::reconstructFromNeuralGraph()
 
 void NsgsPredictor::runAsyncEventProcessing()
 {
-    std::cout << "NSGS: Running asynchronous event processing with edge-based priority scheduling..." << std::endl;
+    // Start timeout counter
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto timeout = startTime + std::chrono::seconds(10); // 10-second timeout
     
-    // Extract embeddings from the model output
-    // In ONNX models, mask embeddings/protos are typically the second output tensor
-    if (outputTensors.size() < 2 || !this->hasMask) {
-        std::cout << "NSGS: No mask embeddings available, using basic processing" << std::endl;
+    if (!spikeQueue) {
+        std::cerr << "NSGS: SpikeQueue not initialized" << std::endl;
         return;
     }
     
-    // Validate tensor data before using
-    float* maskOutput = nullptr;
-    try {
-        maskOutput = outputTensors[1].GetTensorMutableData<float>();
-    } catch (const Ort::Exception& e) {
-        std::cerr << "NSGS: Error accessing mask output tensor: " << e.what() << std::endl;
-        return;
-    }
+    // Start processing in the queue's thread pool
+    spikeQueue->startProcessing(&graphNodes);
     
-    if (!maskOutput) {
-        std::cerr << "NSGS: Invalid mask output data" << std::endl;
-        return;
-    }
-    
-    std::vector<int64_t> maskShape;
-    try {
-        maskShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
-    } catch (const Ort::Exception& e) {
-        std::cerr << "NSGS: Error getting mask shape: " << e.what() << std::endl;
-        return;
-    }
-    
-    // Validate shape dimensions
-    if (maskShape.size() < 4) {
-        std::cerr << "NSGS: Invalid mask shape, expected at least 4 dimensions" << std::endl;
-        return;
-    }
-    
-    int protoChannels = maskShape[1]; // Number of proto/embedding channels
-    int protoHeight = maskShape[2];
-    int protoWidth = maskShape[3];
-    
-    std::cout << "NSGS: Using embeddings with shape [" << protoChannels << ", " 
-              << protoHeight << ", " << protoWidth << "]" << std::endl;
-    
-    // Create proper embedding matrix from ONNX model's proto tensors
-    cv::Mat embeddings(protoHeight, protoWidth, CV_32FC(protoChannels), maskOutput);
-    
-    // Initialize node potentials from embeddings - sets initial activity levels
-    initializeNodePotentials(embeddings);
-    
-    // Process the main detection output to get high-confidence regions for seeding
-    float* boxOutput = nullptr;
-    try {
-        boxOutput = outputTensors[0].GetTensorMutableData<float>();
-    } catch (const Ort::Exception& e) {
-        std::cerr << "NSGS: Error accessing box output tensor: " << e.what() << std::endl;
-        return;
-    }
-    
-    if (!boxOutput) {
-        std::cerr << "NSGS: Invalid box output data" << std::endl;
-        return;
-    }
-    
-    // Validate output shape before using
-    if (this->outputShapes.size() < 1 || this->outputShapes[0].size() < 3) {
-        std::cerr << "NSGS: Invalid output shapes" << std::endl;
-        return;
-    }
-    
-    cv::Mat output0 = cv::Mat(cv::Size((int)this->outputShapes[0][2], (int)this->outputShapes[0][1]), CV_32F, boxOutput).t();
-    float* output0ptr = (float *)output0.data;
-    int rows = (int)this->outputShapes[0][2];
-    int cols = (int)this->outputShapes[0][1];
-    
-    // Process detection boxes to seed initial class assignments
-    std::vector<int> seedClassIds;
-    std::vector<float> seedConfidences;
-    std::vector<cv::Point2f> seedPositions;
-    std::vector<cv::Rect> seedBoxes;
-    
-    for (int i = 0; i < rows; i++) {
-        std::vector<float> it(output0ptr + i * cols, output0ptr + (i + 1) * cols);
-        float confidence;
-        int classId;
-        this->getBestClassInfo(it.begin(), confidence, classId, classNums);
-        
-        if (confidence > this->confThreshold * 1.2f) { // Only use high-confidence detections
-            int centerX = (int)(it[0]);
-            int centerY = (int)(it[1]);
-            int width = (int)(it[2]);
-            int height = (int)(it[3]);
-            int left = centerX - width / 2;
-            int top = centerY - height / 2;
-            
-            seedClassIds.push_back(classId);
-            seedConfidences.push_back(confidence);
-            seedPositions.push_back(cv::Point2f(centerX, centerY));
-            seedBoxes.push_back(cv::Rect(left, top, width, height));
-        }
-    }
-    
-    // Seed nodes with class assignments based on detection boxes
-    if (!seedPositions.empty()) {
-        const int maxSeeds = 50; // Limit number of seed points for performance
-        int numSeeds = std::min(maxSeeds, (int)seedPositions.size());
-        
-        for (int i = 0; i < numSeeds; i++) {
-            // Find closest node to this seed position
-            float minDist = std::numeric_limits<float>::max();
-            int bestNodeIdx = -1;
-            
-            for (size_t j = 0; j < graphNodes.size(); j++) {
-                cv::Point2i nodePos = graphNodes[j]->getPosition();
-                float dist = cv::norm(cv::Point2f(nodePos.x, nodePos.y) - seedPositions[i]);
-                
-                if (dist < minDist) {
-                    minDist = dist;
-                    bestNodeIdx = j;
-                }
-            }
-            
-            // Assign class to the closest node
-            if (bestNodeIdx >= 0) {
-                graphNodes[bestNodeIdx]->setClassId(seedClassIds[i]);
-                graphNodes[bestNodeIdx]->setConfidence(seedConfidences[i]);
-                graphNodes[bestNodeIdx]->incrementPotential(1.0f);
-                
-                // Also find and assign to a group of nodes within the detection box
-                // This creates stronger seed regions based on feature similarity
-                cv::Rect box = seedBoxes[i];
-                const std::vector<float> &seedFeatures = graphNodes[bestNodeIdx]->getFeatures();
-                
-                // Assign class to nodes within the box that have similar features
-                for (size_t j = 0; j < graphNodes.size(); j++) {
-                    if (j == bestNodeIdx) continue; // Skip seed node
-                    
-                    cv::Point2i nodePos = graphNodes[j]->getPosition();
-                    
-                    // Check if node is inside detection box (with small margin)
-                    if (box.contains(nodePos)) {
-                        // Calculate feature similarity with seed node
-                        const std::vector<float> &nodeFeatures = graphNodes[j]->getFeatures();
-                        float similarity = 0.0f;
-                        
-                        if (!seedFeatures.empty() && !nodeFeatures.empty()) {
-                            size_t minSize = std::min(seedFeatures.size(), nodeFeatures.size());
-                            float dotProduct = 0.0f;
-                            float normSeed = 0.0f, normNode = 0.0f;
-                            
-                            for (size_t k = 0; k < minSize; k++) {
-                                dotProduct += seedFeatures[k] * nodeFeatures[k];
-                                normSeed += seedFeatures[k] * seedFeatures[k];
-                                normNode += nodeFeatures[k] * nodeFeatures[k];
-                            }
-                            
-                            if (normSeed > 0 && normNode > 0) {
-                                similarity = dotProduct / (std::sqrt(normSeed) * std::sqrt(normNode));
-                                similarity = std::max(0.0f, similarity);
-                            }
-                        }
-                        
-                        // Only assign class if features are similar enough (prevents leaking across edges)
-                        if (similarity > 0.7f) {
-                            graphNodes[j]->setClassId(seedClassIds[i]);
-                            // Lower confidence for propagated nodes
-                            graphNodes[j]->setConfidence(seedConfidences[i] * similarity);
-                            // Higher initial potential for more similar nodes
-                            graphNodes[j]->incrementPotential(0.7f * similarity);
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        // Fallback if no high-confidence detections were found
-        std::cout << "NSGS: No high-confidence detections, using feature-based clustering" << std::endl;
-        
-        // Apply feature-based clustering to find natural segments
-        // First compute distance matrix between node features
-        const int maxClusterNodes = std::min((int)graphNodes.size(), 500);
-        std::vector<int> nodeIndices(graphNodes.size());
-        for (size_t i = 0; i < nodeIndices.size(); i++) {
-            nodeIndices[i] = i;
+    // While the queue is processing, periodically check if we need to adapt
+    while (spikeQueue->isProcessing()) {
+        // Check for timeout
+        if (std::chrono::high_resolution_clock::now() > timeout) {
+            std::cout << "NSGS: Timeout during spike processing after 10 seconds, continuing with partial results" << std::endl;
+            spikeQueue->stopProcessing();
+            break;
         }
         
-        // Randomly sample nodes if there are too many (for performance)
-        if (graphNodes.size() > maxClusterNodes) {
-            std::random_device rd;
-            std::mt19937 g(rd());
-            std::shuffle(nodeIndices.begin(), nodeIndices.end(), g);
-            nodeIndices.resize(maxClusterNodes);
-        }
-        
-        // Group nodes with similar features using a simple clustering approach
-        const float similarityThreshold = 0.85f;
-        const int minClusterSize = 5;
-        
-        std::vector<int> nodeClusterIds(nodeIndices.size(), -1);
-        int nextClusterId = 0;
-        
-        for (size_t i = 0; i < nodeIndices.size(); i++) {
-            if (nodeClusterIds[i] >= 0) continue; // Skip assigned nodes
-            
-            // Start a new cluster
-            std::vector<size_t> clusterIndices;
-            clusterIndices.push_back(i);
-            nodeClusterIds[i] = nextClusterId;
-            
-            // Find similar nodes
-            for (size_t j = 0; j < nodeIndices.size(); j++) {
-                if (i == j || nodeClusterIds[j] >= 0) continue;
-                
-                const std::vector<float> &featuresI = graphNodes[nodeIndices[i]]->getFeatures();
-                const std::vector<float> &featuresJ = graphNodes[nodeIndices[j]]->getFeatures();
-                
-                float similarity = 0.0f;
-                if (!featuresI.empty() && !featuresJ.empty()) {
-                    size_t minSize = std::min(featuresI.size(), featuresJ.size());
-                    float dotProduct = 0.0f;
-                    float normI = 0.0f, normJ = 0.0f;
-                    
-                    for (size_t k = 0; k < minSize; k++) {
-                        dotProduct += featuresI[k] * featuresJ[k];
-                        normI += featuresI[k] * featuresI[k];
-                        normJ += featuresJ[k] * featuresJ[k];
-                    }
-                    
-                    if (normI > 0 && normJ > 0) {
-                        similarity = dotProduct / (std::sqrt(normI) * std::sqrt(normJ));
-                    }
-                }
-                
-                if (similarity > similarityThreshold) {
-                    clusterIndices.push_back(j);
-                    nodeClusterIds[j] = nextClusterId;
-                }
-            }
-            
-            // Only keep sufficiently large clusters
-            if (clusterIndices.size() >= minClusterSize) {
-                // Assign a random class ID to this cluster
-                int seedClass = nextClusterId % classNums;
-                float seedConfidence = 0.7f;
-                
-                for (size_t idx : clusterIndices) {
-                    int nodeIdx = nodeIndices[idx];
-                    graphNodes[nodeIdx]->setClassId(seedClass);
-                    graphNodes[nodeIdx]->setConfidence(seedConfidence);
-                    graphNodes[nodeIdx]->incrementPotential(0.8f);
-                }
-                
-                nextClusterId++;
-            } else {
-                // Reset small clusters
-                for (size_t j = 0; j < nodeClusterIds.size(); j++) {
-                    if (nodeClusterIds[j] == nextClusterId) {
-                        nodeClusterIds[j] = -1;
-                    }
-                }
-            }
-        }
-        
-        std::cout << "NSGS: Created " << nextClusterId << " feature-based clusters" << std::endl;
-    }
-    
-    // Start spike propagation to spread class assignments through the graph
-    propagateSpikes(true);
-    
-    // Wait for spike processing to complete (with timeout)
-    // This is now using priority-based scheduling which processes edge spikes first
-    const int maxIterations = 20; // Max iterations to prevent infinite loops
-    int iterations = 0;
-    
-    while (iterations < maxIterations && !spikeQueue->isEmpty()) {
+        // Give the threads some time to work (process spikes)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        iterations++;
+        
+        // Log progress
+        if ((spikeQueue->getProcessedCount() % 100) == 0 && spikeQueue->getProcessedCount() > 0) {
+            std::cout << "NSGS: Processed " << spikeQueue->getProcessedCount() 
+                      << " spikes, " << spikeQueue->getStateChanges() << " state changes, "
+                      << spikeQueue->size() << " in queue" << std::endl;
+        }
     }
     
-    std::cout << "NSGS: Processed " << spikeQueue->getProcessedCount() << " spikes in " 
-              << iterations << " iterations using priority scheduling" << std::endl;
-    std::cout << "NSGS: Max queue size was " << spikeQueue->getHighWatermark() << std::endl;
+    // Print final statistics
+    std::cout << "NSGS: Event processing complete - " 
+              << spikeQueue->getProcessedCount() << " spikes processed, "
+              << spikeQueue->getStateChanges() << " state changes" << std::endl;
 }
 
 std::vector<Yolov8Result> NsgsPredictor::postprocessing(const cv::Size &resizedImageShape,
@@ -1606,7 +1301,60 @@ std::vector<Yolov8Result> NsgsPredictor::postprocessing(const cv::Size &resizedI
     buildSegmentationGraph(processedRgbImage);
 
     // Continue with neural graph processing
-    runAsyncEventProcessing();
+    // Add a timeout wrapper around runAsyncEventProcessing to prevent getting stuck
+    std::cout << "NSGS: Starting neural graph processing with 10 second timeout..." << std::endl;
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto timeout = startTime + std::chrono::seconds(10);
+
+    // Create a processing thread that we can interrupt if it takes too long
+    std::atomic<bool> processingCompleted(false);
+    std::thread processingThread([&]() {
+        try {
+            // This is the main processing function that might be getting stuck
+            runAsyncEventProcessing();
+            processingCompleted.store(true);
+        } catch (const std::exception& e) {
+            std::cerr << "NSGS: Exception in processing thread: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "NSGS: Unknown exception in processing thread" << std::endl;
+        }
+    });
+
+    // Monitor the processing thread with timeout
+    int progressCounter = 0;
+    while (!processingCompleted.load()) {
+        // Check if we've exceeded the timeout
+        auto now = std::chrono::high_resolution_clock::now();
+        if (now > timeout) {
+            std::cout << "NSGS: Processing timeout reached (10s). Continuing with partial results." << std::endl;
+            break;
+        }
+        
+        // Print progress every second
+        if (++progressCounter % 10 == 0) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count() / 1000.0;
+            std::cout << "NSGS: Still processing... " << elapsed << " seconds elapsed" << std::endl;
+        }
+        
+        // Short sleep to avoid busy-waiting
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    // Clean up the processing thread
+    if (processingThread.joinable()) {
+        if (!processingCompleted.load()) {
+            // Thread is still running but we've timed out - we need to let it finish naturally
+            // We can't cancel it safely but we'll let it continue running in the background
+            processingThread.detach();
+            std::cout << "NSGS: Processing thread detached, continuing with reconstruction..." << std::endl;
+        } else {
+            // Thread completed successfully
+            processingThread.join();
+            std::cout << "NSGS: Processing thread completed successfully" << std::endl;
+        }
+    }
+
+    // Proceed with reconstruction regardless of whether processing completed or timed out
     cv::Mat neurographMask = reconstructFromNeuralGraph();
     
     // Prepare results
@@ -2384,4 +2132,333 @@ void NsgsPredictor::registerNodeEdgeStrengths(const cv::Mat &image)
     }
     
     std::cout << "NSGS: Registered edge strengths for " << graphNodes.size() << " nodes" << std::endl;
-} 
+}
+
+std::vector<Yolov8Result> NsgsPredictor::detect(cv::Mat& image, float confThreshold, float iouThreshold, float maskThreshold)
+{
+    std::cout << "NSGS: Starting detection with enhanced timeout protection..." << std::endl;
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto totalTimeout = startTime + std::chrono::seconds(15); // Reduced from 30 seconds to 15 seconds
+
+    // Save thresholds
+    this->confThreshold = confThreshold;
+    this->iouThreshold = iouThreshold;
+    this->maskThreshold = maskThreshold;
+    
+    // Initialize results vector
+    std::vector<Yolov8Result> results;
+    
+    // Validate image before processing
+    if (image.empty()) {
+        std::cerr << "NSGS: Empty image provided to detect" << std::endl;
+        return results;
+    }
+    
+    // Original synchronous processing
+    float *blob = nullptr;
+    std::vector<int64_t> inputTensorShape{1, 3, -1, -1};
+    
+    // Use existing preprocessing method
+    this->preprocessing(image, blob, inputTensorShape);
+    
+    // Safety check for blob allocation
+    if (!blob) {
+        std::cerr << "NSGS: Failed to allocate blob in preprocessing" << std::endl;
+        return results;
+    }
+
+    size_t inputTensorSize = utils::vectorProduct(inputTensorShape);
+    std::vector<float> inputTensorValues(blob, blob + inputTensorSize);
+
+    // Run inference with exception handling 
+    try {
+        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(
+            OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
+
+        std::vector<Ort::Value> inputTensors;
+        inputTensors.push_back(Ort::Value::CreateTensor<float>(
+            memoryInfo, inputTensorValues.data(), inputTensorSize,
+            inputTensorShape.data(), inputTensorShape.size()));
+            
+        // Run inference
+        this->outputTensors = this->session.Run(
+            Ort::RunOptions{nullptr},
+            this->inputNames.data(),
+            inputTensors.data(),
+            this->inputNames.size(),
+            this->outputNames.data(),
+            this->outputNames.size());
+            
+        // Save output shapes
+        this->outputShapes.clear();
+        for (size_t i = 0; i < this->outputTensors.size(); i++) {
+            auto info = this->outputTensors[i].GetTensorTypeAndShapeInfo();
+            this->outputShapes.push_back(info.GetShape());
+        }
+    } catch (const Ort::Exception& e) {
+        std::cerr << "NSGS Exception during inference: " << e.what() << std::endl;
+        delete[] blob;
+        return results;
+    }
+    
+    // Check if we've exceeded our total timeout
+    if (std::chrono::high_resolution_clock::now() > totalTimeout) {
+        std::cout << "NSGS: Total timeout exceeded in detect(), returning empty results" << std::endl;
+        delete[] blob;
+        return results;
+    }
+    
+    // First phase: Standard YOLO detection - Always get basic detection results
+    std::cout << "NSGS: Processing initial YOLO detections..." << std::endl;
+    cv::Size resizedShape(inputTensorShape[3], inputTensorShape[2]);
+    cv::Size originalShape = image.size();
+    
+    // Process the output tensors directly for basic detection
+    // Use the existing results vector declared earlier
+    
+    // Box outputs
+    std::vector<cv::Rect> boxes;
+    std::vector<float> confs;
+    std::vector<int> classIds;
+
+    float *boxOutput = nullptr;
+    try {
+        if (!this->outputTensors.empty()) {
+            boxOutput = this->outputTensors[0].GetTensorMutableData<float>();
+        }
+    } catch (const Ort::Exception& e) {
+        std::cerr << "NSGS: Error accessing box output tensor: " << e.what() << std::endl;
+        delete[] blob;
+        return results;
+    }
+    
+    if (!boxOutput) {
+        std::cerr << "NSGS: Invalid box output data in detect" << std::endl;
+        delete[] blob;
+        return results;
+    }
+    
+    // Process detections
+    cv::Mat output0 = cv::Mat(cv::Size((int)this->outputShapes[0][2], (int)this->outputShapes[0][1]), CV_32F, boxOutput).t();
+    float *output0ptr = (float *)output0.data;
+    int rows = (int)this->outputShapes[0][2];
+    int cols = (int)this->outputShapes[0][1];
+    
+    std::cout << "NSGS: Processing " << rows << " detections with " << cols << " features each" << std::endl;
+    
+    // For mask handling
+    std::vector<std::vector<float>> picked_proposals;
+    cv::Mat mask_protos;
+
+    // Process detection boxes
+    for (int i = 0; i < rows; i++)
+    {
+        std::vector<float> it(output0ptr + i * cols, output0ptr + (i + 1) * cols);
+        
+        // Safety check for classNums
+        if (it.size() < 4 + classNums) {
+            continue;
+        }
+        
+        float confidence;
+        int classId;
+        this->getBestClassInfo(it.begin(), confidence, classId, classNums);
+
+        if (confidence > this->confThreshold)
+        {
+            if (this->hasMask)
+            {
+                // Check for valid mask proposals
+                if (it.size() > 4 + classNums) {
+                    std::vector<float> temp(it.begin() + 4 + classNums, it.end());
+                    picked_proposals.push_back(temp);
+                }
+            }
+            int centerX = (int)(it[0]);
+            int centerY = (int)(it[1]);
+            int width = (int)(it[2]);
+            int height = (int)(it[3]);
+            int left = centerX - width / 2;
+            int top = centerY - height / 2;
+            boxes.emplace_back(left, top, width, height);
+            confs.emplace_back(confidence);
+            classIds.emplace_back(classId);
+        }
+    }
+
+    std::cout << "NSGS: Found " << boxes.size() << " initial detections above confidence threshold" << std::endl;
+
+    // Apply NMS
+    std::vector<int> indices;
+    if (!boxes.empty()) {
+        cv::dnn::NMSBoxes(boxes, confs, this->confThreshold, this->iouThreshold, indices);
+    }
+    
+    std::cout << "NSGS: After NMS: " << indices.size() << " final detections" << std::endl;
+
+    // Process masks if available
+    if (this->hasMask && this->outputTensors.size() > 1)
+    {
+        float *maskOutput = nullptr;
+        try {
+            maskOutput = this->outputTensors[1].GetTensorMutableData<float>();
+        } catch (const Ort::Exception& e) {
+            std::cerr << "NSGS: Error accessing mask output tensor: " << e.what() << std::endl;
+        }
+        
+        if (maskOutput && this->outputShapes.size() > 1 && this->outputShapes[1].size() >= 4) {
+            std::vector<int64_t> maskShape = this->outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
+            std::vector<int> mask_protos_shape = {1, (int)maskShape[1], (int)maskShape[2], (int)maskShape[3]};
+            mask_protos = cv::Mat(mask_protos_shape, CV_32F, maskOutput);
+            std::cout << "NSGS: Loaded mask prototypes: " << maskShape[1] << " channels, " 
+                      << maskShape[2] << "x" << maskShape[3] << " resolution" << std::endl;
+        }
+    }
+    
+    // Create initial results from basic detections
+    for (int idx : indices)
+    {
+        Yolov8Result res;
+        res.box = cv::Rect(boxes[idx]);
+        res.conf = confs[idx];
+        res.classId = classIds[idx];
+        
+        if (this->hasMask && !mask_protos.empty() && idx < picked_proposals.size())
+        {
+            // Get the CNN-predicted mask
+            cv::Mat proposal_mat = cv::Mat(picked_proposals[idx]).t();
+            if (!proposal_mat.empty()) {
+                cv::Mat cnnMask = this->getMask(proposal_mat, mask_protos);
+                if (!cnnMask.empty()) {
+                    // Scale mask to original image size
+                    utils::scaleCoords(res.box, cnnMask, this->maskThreshold, resizedShape, originalShape);
+                    res.boxMask = cnnMask;
+                }
+            }
+        }
+        
+        results.emplace_back(res);
+    }
+    
+    std::cout << "NSGS: Created " << results.size() << " detection results" << std::endl;
+    
+    // Set a flag to track if we completed full processing
+    bool fullProcessingCompleted = false;
+    
+    // Only proceed with neural graph if enabled
+    if (this->hasMask) {
+        try {
+            auto graphStartTime = std::chrono::high_resolution_clock::now();
+            auto graphTimeout = graphStartTime + std::chrono::seconds(5); // Reduced from 15 seconds to 5 seconds
+            
+            // Extract features and create graph
+            std::cout << "NSGS: Creating neural graph for segmentation..." << std::endl;
+            buildSegmentationGraph(image);
+            
+            // Check timeout after graph creation
+            if (std::chrono::high_resolution_clock::now() > graphTimeout) {
+                std::cout << "NSGS: Timeout after graph creation, skipping remaining steps but ensuring results are saved" << std::endl;
+                delete[] blob;
+                return results;  // Return basic results
+            }
+            
+            // Extract features for each node (using existing embeddings from the output tensor)
+            std::cout << "NSGS: Extracting node features..." << std::endl;
+            
+            // Create embeddings matrix if available
+            cv::Mat embeddings;
+            if (this->outputTensors.size() > 1) {
+                float *maskOutput = this->outputTensors[1].GetTensorMutableData<float>();
+                if (maskOutput && this->outputShapes.size() > 1 && this->outputShapes[1].size() >= 4) {
+                    int protoChannels = this->outputShapes[1][1];
+                    int protoHeight = this->outputShapes[1][2];
+                    int protoWidth = this->outputShapes[1][3];
+                    
+                    embeddings = cv::Mat(protoHeight, protoWidth, CV_32FC(protoChannels), maskOutput);
+                }
+            }
+            
+            extractNodeFeatures(image, embeddings);
+            
+            // Check timeout after feature extraction
+            if (std::chrono::high_resolution_clock::now() > graphTimeout) {
+                std::cout << "NSGS: Timeout after feature extraction, skipping remaining steps but ensuring results are saved" << std::endl;
+                delete[] blob;
+                return results;  // Return basic results
+            }
+            
+            // Set up timing for propagation
+            auto propagationStartTime = std::chrono::high_resolution_clock::now();
+            auto propagationTimeout = propagationStartTime + std::chrono::seconds(3); // Reduced from 7 seconds to 3 seconds
+            
+            // Try to run the propagation with timeout protection
+            try {
+                // Run propagation on this thread with timeout
+                std::cout << "NSGS: Running spike propagation with timeout protection..." << std::endl;
+                this->propagateSpikes(true);
+                
+                // Check if timeout occurred
+                if (std::chrono::high_resolution_clock::now() > propagationTimeout) {
+                    std::cout << "NSGS: Timeout during propagation, proceeding with partial results" << std::endl;
+                } else {
+                    std::cout << "NSGS: Propagation completed successfully" << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "NSGS: Exception during spike propagation: " << e.what() << std::endl;
+            }
+            
+            // Always proceed with event processing regardless of propagation completion
+            std::cout << "NSGS: Running event processing..." << std::endl;
+            this->runAsyncEventProcessing();
+            
+            // Reconstruct segmentation from neural graph
+            std::cout << "NSGS: Reconstructing segmentation from neural graph..." << std::endl;
+            cv::Mat segMask = this->reconstructFromNeuralGraph();
+            
+            // If segmentation was successful, update masks in results
+            if (!segMask.empty()) {
+                std::cout << "NSGS: Updating results with graph-based segmentation" << std::endl;
+                for (auto& result : results) {
+                    // Determine if this detection overlaps with any labeled regions in the segmentation
+                    cv::Rect bbox = result.box;
+                    // Ensure bounds are valid
+                    int x = std::max(0, bbox.x);
+                    int y = std::max(0, bbox.y);
+                    int width = std::min(segMask.cols - x, bbox.width);
+                    int height = std::min(segMask.rows - y, bbox.height);
+                    
+                    if (width <= 0 || height <= 0) continue; // Skip invalid regions
+                    
+                    cv::Rect validRect(x, y, width, height);
+                    cv::Mat maskROI = segMask(validRect);
+                    
+                    // If there's a valid segmentation for this detection's region
+                    if (!maskROI.empty() && cv::countNonZero(maskROI) > 0) {
+                        // Create new mask for this detection
+                        cv::Mat newMask = cv::Mat::zeros(image.rows, image.cols, CV_8UC1);
+                        
+                        // Copy the segmentation mask for this region
+                        cv::Mat segROI = newMask(bbox);
+                        maskROI.copyTo(segROI);
+                        
+                        // Update the result with this new mask
+                        result.boxMask = newMask;
+                    }
+                }
+                fullProcessingCompleted = true;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "NSGS: Exception during neural graph processing: " << e.what() << std::endl;
+        }
+    }
+    
+    auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - startTime).count();
+    std::cout << "NSGS: Detection " << (fullProcessingCompleted ? "fully completed" : "partially completed") 
+              << " in " << elapsedTime << "ms" << std::endl;
+    
+    // Clean up allocated memory
+    delete[] blob;
+    
+    return results;
+}

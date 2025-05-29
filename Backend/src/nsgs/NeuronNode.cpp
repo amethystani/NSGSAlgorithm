@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <iostream>
+#include <vector>
 
 NeuronNode::NeuronNode(int id, cv::Point2i position, std::shared_ptr<SpikeQueue> queue)
     : id(id), 
@@ -105,111 +106,137 @@ void NeuronNode::adaptThreshold(float multiplier)
 
 bool NeuronNode::checkAndFire()
 {
-    std::lock_guard<std::mutex> lock(nodeMutex);
-    
-    // If in refractory period, cannot fire
-    if (refractoryPeriod.load() > 0)
+    // Temporary store for spikes to be added outside the lock
+    std::vector<Spike> spikes_to_add; // Spike struct from SpikeQueue.h
+
+    // Scope for nodeMutex lock
     {
-        refractoryPeriod.fetch_sub(1);
-        return false;
-    }
-    
-    // Check if potential exceeds threshold
-    float currentPotential = statePotential.load();
-    float effectiveThreshold = threshold * adaptiveThresholdModifier;
-    
-    if (currentPotential > effectiveThreshold)
-    {
-        // NSGS Enhancement: Check neighborhood class consistency before firing
-        // This helps form clearer boundaries between segments
-        bool shouldFire = true;
-        int dominantClassId = -1;
-        float maxClassConfidence = 0.0f;
+        std::lock_guard<std::mutex> lock(nodeMutex);
         
-        // Only perform consistency check if this node has a class
-        if (classId >= 0) {
-            // Count active neighbors by class
-            std::unordered_map<int, int> neighborClassCounts;
-            std::unordered_map<int, float> neighborClassConfidences;
-            int activeNeighbors = 0;
-            
-            for (size_t i = 0; i < connections.size(); i++) {
-                if (connections[i].target) {
-                    int neighborClass = connections[i].target->getClassId();
-                    if (neighborClass >= 0) {
-                        neighborClassCounts[neighborClass]++;
-                        neighborClassConfidences[neighborClass] += connections[i].target->getConfidence();
-                        activeNeighbors++;
-                    }
-                }
-            }
-            
-            // Find dominant class among neighbors
-            for (const auto& pair : neighborClassCounts) {
-                float avgConfidence = neighborClassConfidences[pair.first] / pair.second;
-                if (pair.second > neighborClassCounts[dominantClassId] || 
-                    (pair.second == neighborClassCounts[dominantClassId] && 
-                     avgConfidence > maxClassConfidence)) {
-                    dominantClassId = pair.first;
-                    maxClassConfidence = avgConfidence;
-                }
-            }
-            
-            // If this node's class differs from dominant neighbor class and 
-            // the dominant class has strong representation, inhibit firing
-            // This prevents crossing established segment boundaries
-            if (activeNeighbors > 3 && // At least 3 classified neighbors
-                dominantClassId >= 0 && dominantClassId != classId && 
-                neighborClassCounts[dominantClassId] > activeNeighbors/2) {
-                
-                // Instead of firing, adapt class to match neighborhood if confidence is low
-                // This helps clean up noisy classifications
-                if (confidence < 0.6f && maxClassConfidence > 0.7f) {
-                    classId = dominantClassId;
-                    confidence = 0.8f * maxClassConfidence; // Slightly reduce confidence for propagated classes
-                    
-                    // Reduce potential to prevent immediate firing with new class
-                    statePotential.store(0.5f * effectiveThreshold);
-                    return false;
-                }
-                
-                // High confidence nodes resist class changes and don't fire across boundaries
-                if (confidence > 0.7f) {
-                    shouldFire = false;
-                    // Strong class identity enhances refractory period
-                    refractoryPeriod.store(8);
-                    // And reduces potential
-                    statePotential.store(0.25f * effectiveThreshold);
-                    return false;
-                }
-            }
+        // If in refractory period, cannot fire
+        if (refractoryPeriod.load() > 0)
+        {
+            refractoryPeriod.fetch_sub(1);
+            return false;
         }
         
-        if (shouldFire) {
-            // Reset potential
-            statePotential.store(0.0f);
+        // Check if potential exceeds threshold
+        float currentPotential = statePotential.load();
+        float effectiveThreshold = threshold * adaptiveThresholdModifier;
+
+        
+        if (currentPotential > effectiveThreshold)
+        {
+            // NSGS Enhancement: Check neighborhood class consistency before firing
+            // This helps form clearer boundaries between segments
+            bool shouldFire = true;
+            int dominantClassId = -1;
+            float maxClassConfidence = 0.0f;
+            std::unordered_map<int, int> neighborClassCounts;
             
-            // Enter refractory period - higher for nodes with assigned classes
-            int baseRefractoryPeriod = 5;
+            // Only perform consistency check if this node has a class
             if (classId >= 0) {
-                // Classified nodes have longer refractory periods proportional to confidence
-                refractoryPeriod.store(baseRefractoryPeriod + static_cast<int>(5.0f * confidence));
-            } else {
-                refractoryPeriod.store(baseRefractoryPeriod);
-            }
-            
-            // Send spikes to all connected nodes
-            if (spikeQueue) {
+                // Count active neighbors by class
+                std::unordered_map<int, float> neighborClassConfidences;
+                int activeNeighbors = 0;
+                
                 for (size_t i = 0; i < connections.size(); i++) {
                     if (connections[i].target) {
-                        // Add spike to the queue
-                        spikeQueue->addSpike(id, connections[i].target->getId(), connections[i].weight);
+                        int neighborClass = connections[i].target->getClassId();
+                        if (neighborClass >= 0) {
+                            neighborClassCounts[neighborClass]++;
+                            neighborClassConfidences[neighborClass] += connections[i].target->getConfidence();
+                            activeNeighbors++;
+                        }
+                    }
+                }
+                
+                // Find dominant class among neighbors
+                if (!neighborClassCounts.empty()) {
+                    dominantClassId = neighborClassCounts.begin()->first;
+                    maxClassConfidence = 0.0f;
+                    for (const auto& pair : neighborClassCounts) {
+                        float avgConfidence = (pair.second > 0) ? neighborClassConfidences[pair.first] / pair.second : 0.0f;
+                        auto dominantEntryIt = neighborClassCounts.find(dominantClassId);
+                        int dominantClassCount = (dominantEntryIt != neighborClassCounts.end()) ? dominantEntryIt->second : 0;
+
+                        if (pair.second > dominantClassCount || 
+                            (pair.second == dominantClassCount && avgConfidence > maxClassConfidence)) {
+                            dominantClassId = pair.first;
+                            maxClassConfidence = avgConfidence;
+                        }
+                    }
+                } else {
+                    dominantClassId = -1;
+                }
+
+                
+                // If this node's class differs from dominant neighbor class and 
+                // the dominant class has strong representation, inhibit firing
+                // This prevents crossing established segment boundaries
+                if (activeNeighbors > 3 && // At least 3 classified neighbors
+                    dominantClassId >= 0 && dominantClassId != classId && 
+                    neighborClassCounts[dominantClassId] > activeNeighbors/2) {
+                    
+                    // Instead of firing, adapt class to match neighborhood if confidence is low
+                    // This helps clean up noisy classifications
+                    if (confidence < 0.6f && maxClassConfidence > 0.7f) {
+                        classId = dominantClassId;
+                        confidence = 0.8f * maxClassConfidence; // Slightly reduce confidence for propagated classes
+                        
+                        // Reduce potential to prevent immediate firing with new class
+                        statePotential.store(0.5f * effectiveThreshold);
+                        return false;
+                    }
+                    
+                    // High confidence nodes resist class changes and don't fire across boundaries
+                    if (confidence > 0.7f) {
+                        shouldFire = false;
+                        // Strong class identity enhances refractory period
+                        refractoryPeriod.store(8);
+                        // And reduces potential
+                        statePotential.store(0.25f * effectiveThreshold);
+                        return false;
                     }
                 }
             }
             
-            return true;
+            if (shouldFire) {
+                // Reset potential
+                statePotential.store(0.0f);
+                
+                // Enter refractory period - higher for nodes with assigned classes
+                int baseRefractoryPeriod = 5;
+                if (classId >= 0) {
+                    // Classified nodes have longer refractory periods proportional to confidence
+                    refractoryPeriod.store(baseRefractoryPeriod + static_cast<int>(5.0f * confidence));
+                } else {
+                    refractoryPeriod.store(baseRefractoryPeriod);
+                }
+                
+                // Collect spikes to be added
+                if (spikeQueue) {
+                    for (size_t i = 0; i < connections.size(); i++) {
+                        if (connections[i].target) {
+                            // Add spike details for later processing
+                            spikes_to_add.emplace_back(id, connections[i].target->getId(), connections[i].weight, 0.0f);
+                        }
+                    }
+                }
+            } else {
+                return false;
+            }
+        } else {
+            return false;
         }
+    } // nodeMutex is released here
+
+    // Add collected spikes to the queue outside the lock
+    if (!spikes_to_add.empty() && spikeQueue) {
+        for (const auto& spike_data : spikes_to_add) {
+            spikeQueue->addSpike(spike_data.sourceNodeId, spike_data.targetNodeId, spike_data.weight);
+        }
+        return true;
     }
     
     return false;

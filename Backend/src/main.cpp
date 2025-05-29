@@ -101,14 +101,40 @@ int main(int argc, char *argv[])
                 std::cout << Filename << " predicting with NSGS..." << std::endl;
 
                 cv::Mat image = cv::imread(Filename);
-                std::vector<Yolov8Result> result = predictor->predict(image);
+                if (image.empty()) {
+                    std::cerr << "Error: Could not read image " << Filename << std::endl;
+                    continue;
+                }
                 
-                utils::visualizeDetection(image, result, classNames);
-
-                std::string newFilename = baseName.substr(0, baseName.find_last_of('.')) + "_" + suffixName + baseName.substr(baseName.find_last_of('.'));
-                std::string outputFilename = savePath + "/" + newFilename;
-                cv::imwrite(outputFilename, image);
-                std::cout << outputFilename << " Saved !!!" << std::endl;
+                std::vector<Yolov8Result> result;
+                
+                try {
+                    // Use the detect method directly to get better timeout handling
+                    result = predictor->detect(image, confThreshold, iouThreshold, maskThreshold);
+                    
+                    // Always process whatever results we have, even if partial
+                    if (!result.empty()) {
+                        std::cout << "NSGS: Got " << result.size() << " detection results" << std::endl;
+                        
+                        // Visualize the detection on the image
+                        utils::visualizeDetection(image, result, classNames);
+                        
+                        // Save the image with detections
+                        std::string newFilename = baseName.substr(0, baseName.find_last_of('.')) + "_" + suffixName + baseName.substr(baseName.find_last_of('.'));
+                        std::string outputFilename = savePath + "/" + newFilename;
+                        bool saved = cv::imwrite(outputFilename, image);
+                        
+                        if (saved) {
+                            std::cout << outputFilename << " Saved !!!" << std::endl;
+                        } else {
+                            std::cerr << "Error saving to " << outputFilename << std::endl;
+                        }
+                    } else {
+                        std::cout << "NSGS: No detection results for " << Filename << std::endl;
+                    }
+                } catch (const std::exception &e) {
+                    std::cerr << "Error processing " << Filename << ": " << e.what() << std::endl;
+                }
             }
         }
         endTime = clock();
