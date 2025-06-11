@@ -13,7 +13,7 @@ export const getApiUrl = () => {
   
   // For devices (iOS/Android), use the network IP
   // This is the actual IP address of your machine on the network
-  const DEVICE_IP = '10.79.107.65'; // Verified this IP matches your current network configuration
+  const DEVICE_IP = '192.168.1.34'; // Verified this IP matches your current network configuration
   
   console.log(`Using mobile platform (${Platform.OS}), API URL will be http://${DEVICE_IP}:3000`);
   return `http://${DEVICE_IP}:3000`;

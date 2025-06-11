@@ -249,6 +249,30 @@ src/nsgs/SpikeQueue.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/SpikeQueue.cpp.s
 .PHONY : src/nsgs/SpikeQueue.cpp.s
 
+src/nsgs/reconstructFromNeuralGraph.o: src/nsgs/reconstructFromNeuralGraph.cpp.o
+.PHONY : src/nsgs/reconstructFromNeuralGraph.o
+
+# target to build an object file
+src/nsgs/reconstructFromNeuralGraph.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/reconstructFromNeuralGraph.cpp.o
+.PHONY : src/nsgs/reconstructFromNeuralGraph.cpp.o
+
+src/nsgs/reconstructFromNeuralGraph.i: src/nsgs/reconstructFromNeuralGraph.cpp.i
+.PHONY : src/nsgs/reconstructFromNeuralGraph.i
+
+# target to preprocess a source file
+src/nsgs/reconstructFromNeuralGraph.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/reconstructFromNeuralGraph.cpp.i
+.PHONY : src/nsgs/reconstructFromNeuralGraph.cpp.i
+
+src/nsgs/reconstructFromNeuralGraph.s: src/nsgs/reconstructFromNeuralGraph.cpp.s
+.PHONY : src/nsgs/reconstructFromNeuralGraph.s
+
+# target to generate assembly for a file
+src/nsgs/reconstructFromNeuralGraph.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/yolov8_ort.dir/build.make CMakeFiles/yolov8_ort.dir/src/nsgs/reconstructFromNeuralGraph.cpp.s
+.PHONY : src/nsgs/reconstructFromNeuralGraph.cpp.s
+
 src/utils.o: src/utils.cpp.o
 .PHONY : src/utils.o
 
@@ -321,6 +345,9 @@ help:
 	@echo "... src/nsgs/SpikeQueue.o"
 	@echo "... src/nsgs/SpikeQueue.i"
 	@echo "... src/nsgs/SpikeQueue.s"
+	@echo "... src/nsgs/reconstructFromNeuralGraph.o"
+	@echo "... src/nsgs/reconstructFromNeuralGraph.i"
+	@echo "... src/nsgs/reconstructFromNeuralGraph.s"
 	@echo "... src/utils.o"
 	@echo "... src/utils.i"
 	@echo "... src/utils.s"

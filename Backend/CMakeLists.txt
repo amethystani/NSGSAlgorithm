@@ -15,6 +15,7 @@ add_executable(yolov8_ort
                src/nsgs/NeuronNode.cpp
                src/nsgs/SpikeQueue.cpp
                src/nsgs/GraphPartition.cpp
+               src/nsgs/reconstructFromNeuralGraph.cpp
                src/nsgs/NsgsPredictor.cpp
                src/main.cpp)
 
