@@ -917,77 +917,53 @@ function processImageFile(req, res) {
     console.log(`Executing command: ${command}`);
     
     // Execute with increased timeout to allow for thorough processing
-    const timeoutMs = 180000; // 180 seconds (3 minutes)
-    const execOptions = { 
-      timeout: timeoutMs,
-      maxBuffer: 100 * 1024 * 1024 // Increase max buffer to 100MB
+    const execOptions = {
+      timeout: 60000, // 60 second timeout
+      maxBuffer: 10 * 1024 * 1024 // 10MB buffer for output
     };
     
     exec(command, execOptions, async (error, stdout, stderr) => {
-      // Calculate processing time
-      const endTime = Date.now();
-      const processingTime = Math.round((endTime - startTime) / 1000);
-      console.log(`Total processing time: ${processingTime} seconds`);
-      
       if (error) {
         console.error(`Error executing command: ${error.message}`);
-        console.error(`stderr: ${stderr}`);
-        
-        // Create a simple fallback output
-        const originalName = req.file.filename;
-        const baseName = originalName.substring(0, originalName.lastIndexOf('.') !== -1 ? 
-          originalName.lastIndexOf('.') : originalName.length);
-        const extension = originalName.lastIndexOf('.') !== -1 ? 
-          originalName.substring(originalName.lastIndexOf('.')) : '.jpg';
-        // Add timestamp for uniqueness
-        const timestamp = Date.now();
-        const processedName = `${baseName}_${suffix}_${timestamp}${extension}`;
-        const processedPath = path.join(requestOutputDir, processedName);
-        
-        // Create output directory if it doesn't exist
-        if (!fs.existsSync(requestOutputDir)) {
-          fs.mkdirSync(requestOutputDir, { recursive: true });
-        }
-        
-        // Simply copy the input file to the output
-        fs.copyFileSync(inputFilePath, processedPath);
-        console.log(`Created fallback output by copying: ${processedPath}`);
-        
-        // Construct the URL for the processed image
-        const processedImageUrl = `/processed/${processedName}`;
-        
-        // Save the processing time in the metadata file
-        try {
-          const metadataPath = path.join(requestOutputDir, `${processedName}.meta.json`);
-          fs.writeFileSync(metadataPath, JSON.stringify({
-            originalName: originalName,
-            processingTime: processingTime,
-            modelType: modelType,
-            processedAt: new Date().toISOString()
-          }));
-          console.log(`Saved metadata to: ${metadataPath}`);
-        } catch (metaError) {
-          console.error(`Error saving metadata: ${metaError.message}`);
-        }
-        
-        // Return with a warning about fallback
-        return res.json({
-          success: true,
-          warning: 'ONNX models not available, showing original image',
-          message: 'Please convert PT models to ONNX format for actual processing',
-          processedImageUrl: processedImageUrl,
-          originalImageName: originalName,
-          processedImageName: processedName,
-          fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
-          isFallback: true,
-          processingTime: processingTime
-        });
+        return res.status(500).json({ error: `Command execution failed: ${error.message}` });
+      }
+
+      const processingTime = (Date.now() - startTime) / 1000;
+      console.log(`C++ processing completed in ${processingTime.toFixed(2)} seconds`);
+      console.log(`Command output: ${stdout.substring(0, 500)}${stdout.length > 500 ? '...' : ''}`);
+
+      // Capture the NSGS logs from stdout
+      const nsgsLogs = stdout;
+      
+      // Parse some basic metrics from the NSGS logs
+      const graphNodesMatch = stdout.match(/NSGS NOVEL: Created (\d+) graph nodes/);
+      const graphNodes = graphNodesMatch ? parseInt(graphNodesMatch[1]) : 0;
+      
+      const spikesMatch = stdout.match(/NSGS NEUROMORPHIC: Total spikes generated: (\d+)/);
+      const processedSpikes = spikesMatch ? parseInt(spikesMatch[1]) : 0;
+      
+      const queueSizeMatch = stdout.match(/NSGS NEUROMORPHIC: Analyzing (\d+) neurons/);
+      const queueSize = queueSizeMatch ? parseInt(queueSizeMatch[1]) : 0;
+      
+      const detectionTimeMatch = stdout.match(/NSGS: Detection fully completed in (\d+)ms/);
+      const detectionTime = detectionTimeMatch ? parseInt(detectionTimeMatch[1]) / 1000 : 0;
+      
+      // Extract any status messages
+      let status = 'Processing complete';
+      if (stdout.includes('NSGS: *** NOVEL NEUROMORPHIC PROCESSING COMPLETED SUCCESSFULLY ***')) {
+        status = 'NSGS processing completed successfully';
       }
       
-      console.log(`stdout: ${stdout}`);
-      if (stderr) {
-        console.warn(`stderr (non-fatal): ${stderr}`);
-      }
+      // Construct metrics for NSGS
+      const nsgsStats = {
+        graphNodes,
+        processedSpikes,
+        queueSize,
+        adaptationMultiplier: 1.0,
+        processingTime: detectionTime || processingTime,
+        status,
+        logsOutput: nsgsLogs // Include the full logs
+      };
       
       // After the command finishes, we should find just one file in the output directory
       // Get the original filename to determine expected output
@@ -1116,7 +1092,9 @@ function processImageFile(req, res) {
           fullUrl: `${req.protocol}://${req.get('host')}${processedImageUrl}`,
           processingTime: processingTime,
           usedNSGS: useOptimizedParallel,
-          imageBase64: imageBase64 // Include base64 data for direct display
+          imageBase64: imageBase64, // Include base64 data for direct display
+          nsgsStats, // Add this line to include NSGS stats and logs
+          commandExecuted: command
         }).on('finish', async () => {
           // Log the image processing data to CSV after response is sent
           try {

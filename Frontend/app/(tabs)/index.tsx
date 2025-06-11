@@ -126,7 +126,8 @@ export default function DetectScreen() {
     queueSize: 0,
     adaptationMultiplier: 1,
     processingTime: 0,
-    status: '', // For status messages like "Creating graph nodes", "Processing spikes", etc.
+    status: '',
+    logsOutput: '', // Add this field to store the raw logs
   });
   
   // Animation values for the progress indicators
@@ -137,7 +138,7 @@ export default function DetectScreen() {
 
   // Add state for triangle animation
   const [loadingDots, setLoadingDots] = useState<{x: number, y: number, opacity: number, fillPercent: number}[]>([]);
-  const triangleAnimationRef = useRef<NodeJS.Timeout | null>(null);
+  const triangleAnimationRef = useRef<any>(null);
 
   // Load NSGS setting from AsyncStorage
   useEffect(() => {
@@ -176,7 +177,7 @@ export default function DetectScreen() {
 
   // Timer interval for processing time
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
+    let interval: any = null;
     
     if (processing) {
       // Reset timer when processing starts
@@ -198,15 +199,14 @@ export default function DetectScreen() {
     setIsTestingConnection(true);
     setError(null);
     try {
-      const connected = await testApiConnection();
-      setApiConnected(connected);
-      if (!connected) {
-        setError('Cannot connect to the API server. Please check if the server is running.');
+      const isConnected = await testApiConnection();
+      setApiConnected(isConnected);
+      if (!isConnected) {
+        throw new Error("API connection failed. Please check your network and server settings.");
       }
-    } catch (err) {
-      console.error('Error testing API connection:', err);
+    } catch (e: any) {
+      setError(e.message || 'An unknown error occurred while connecting to the API');
       setApiConnected(false);
-      setError('Cannot connect to the API server. Please check if the server is running.');
     } finally {
       setIsTestingConnection(false);
     }
@@ -532,6 +532,7 @@ export default function DetectScreen() {
         adaptationMultiplier: 1,
         processingTime: 0,
         status: 'Initializing NSGS...',
+        logsOutput: '', // Initialize empty logs
       });
       
       // Start triangle animation
@@ -548,62 +549,22 @@ export default function DetectScreen() {
   const renderNsgsMetrics = useCallback(() => {
     if (!processedImage || !useNSGS) return null;
     
-    // Use theme from component level instead of calling useTheme() inside this function
     return (
       <View style={[styles.nsgsMetricsContainer, {
         backgroundColor: theme.card,
         ...(isDarkMode ? {} : CARD_SHADOW)
       }]}>
-        <Text style={[styles.nsgsMetricsTitle, { color: theme.text }]}>NSGS Processing Metrics</Text>
+        <Text style={[styles.nsgsMetricsTitle, { color: theme.text }]}>NSGS Processing Logs</Text>
         
-        <View style={styles.nsgsMetricsRow}>
-          <View style={[styles.nsgsMetricBlock, {
-            backgroundColor: isDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
-          }]}>
-            <Text style={[styles.nsgsMetricLabel, { color: theme.textSecondary }]}>Graph Nodes</Text>
-            <Text style={[styles.nsgsMetricValue, { color: theme.text }]}>
-              {nsgsProcessingStats.graphNodes.toLocaleString()}
-            </Text>
-          </View>
-          
-          <View style={[styles.nsgsMetricBlock, {
-            backgroundColor: isDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
-          }]}>
-            <Text style={[styles.nsgsMetricLabel, { color: theme.textSecondary }]}>Processed Spikes</Text>
-            <Text style={[styles.nsgsMetricValue, { color: theme.text }]}>
-              {nsgsProcessingStats.processedSpikes.toLocaleString()}
-            </Text>
-          </View>
-        </View>
-        
-        <View style={styles.nsgsMetricsRow}>
-          <View style={[styles.nsgsMetricBlock, {
-            backgroundColor: isDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
-          }]}>
-            <Text style={[styles.nsgsMetricLabel, { color: theme.textSecondary }]}>Queue Size</Text>
-            <Text style={[styles.nsgsMetricValue, { color: theme.text }]}>
-              {nsgsProcessingStats.queueSize.toLocaleString()}
-            </Text>
-          </View>
-          
-          <View style={[styles.nsgsMetricBlock, {
-            backgroundColor: isDarkMode ? 'rgba(60, 60, 67, 0.15)' : 'rgba(240, 240, 240, 0.8)'
-          }]}>
-            <Text style={[styles.nsgsMetricLabel, { color: theme.textSecondary }]}>Adaptation</Text>
-            <Text style={[styles.nsgsMetricValue, { color: theme.text }]}>
-              {nsgsProcessingStats.adaptationMultiplier.toFixed(5)}x
-            </Text>
-          </View>
-        </View>
-        
-        <View style={[styles.nsgsMetricsTimeContainer, {
-          backgroundColor: isDarkMode ? 'rgba(100, 53, 217, 0.1)' : 'rgba(106, 53, 217, 0.08)'
+        {/* NSGS Raw Log Output */}
+        <ScrollView style={[styles.nsgsLogsScrollView, { 
+          backgroundColor: isDarkMode ? '#1a1a1a' : '#f0f0f0',
+          maxHeight: 400, // Increased height for better visibility
         }]}>
-          <Text style={[styles.nsgsMetricsTimeLabel, { color: theme.textSecondary }]}>Processing Time</Text>
-          <Text style={styles.nsgsMetricsTimeValue}>
-            {nsgsProcessingStats.processingTime.toFixed(2)}s
+          <Text style={[styles.nsgsLogsText, { color: isDarkMode ? '#e0e0e0' : '#333333' }]}>
+            {nsgsProcessingStats.logsOutput || "No logs available"}
           </Text>
-        </View>
+        </ScrollView>
       </View>
     );
   }, [processedImage, useNSGS, nsgsProcessingStats, theme, isDarkMode]);
@@ -680,6 +641,7 @@ export default function DetectScreen() {
       adaptationMultiplier: 1,
       processingTime: 0,
       status: 'Initializing NSGS...',
+      logsOutput: '', // Initialize empty logs
     });
     
     const startTime = Date.now();
@@ -780,6 +742,9 @@ export default function DetectScreen() {
                 finalAdaptationMultiplier = nsgsStats.adaptationMultiplier || finalAdaptationMultiplier;
                 nsgsProcessingTime += (nsgsStats.processingTime || 0); // Use renamed variable
                 
+                // Store the raw logs if available
+                const nsgsLogs = nsgsStats.logsOutput || '';
+                
                 // Update current stats for the progress display
                 setNsgsProcessingStats({
                   graphNodes: totalGraphNodes,
@@ -787,7 +752,8 @@ export default function DetectScreen() {
                   queueSize: maxQueueSize,
                   adaptationMultiplier: finalAdaptationMultiplier,
                   processingTime: nsgsProcessingTime, // Use renamed variable
-                  status: nsgsStats.status || 'Processing complete'
+                  status: nsgsStats.status || 'Processing complete',
+                  logsOutput: nsgsLogs, // Store the logs
                 });
               }
               
@@ -813,7 +779,8 @@ export default function DetectScreen() {
               queueSize: maxQueueSize,
               adaptationMultiplier: finalAdaptationMultiplier,
               processingTime: nsgsProcessingTime, // Use renamed variable
-              status: 'All processing complete'
+              status: 'All processing complete',
+              logsOutput: '', // Clear logs for final result
             });
           }
           
@@ -1293,111 +1260,15 @@ export default function DetectScreen() {
   const renderNsgsProcessingUI = () => {
     if (!processing || !useNSGS) return null;
     
-    const width = RNAnimated.multiply(graphNodesProgress, new RNAnimated.Value(100));
-    const spikesWidth = RNAnimated.multiply(spikesProgress, new RNAnimated.Value(100));
-    const queueWidth = RNAnimated.multiply(queueProgress, new RNAnimated.Value(100));
-    const adaptWidth = RNAnimated.multiply(adaptationProgress, new RNAnimated.Value(100));
-    
     return (
       <View style={styles.nsgsProcessingContainer}>
         <Text style={styles.nsgsHeader}>NSGS Neural Processing</Text>
         
-        <Text style={styles.nsgsStatusText}>{nsgsProcessingStats.status}</Text>
+        <Text style={styles.nsgsStatusText}>{nsgsProcessingStats.status || "Processing..."}</Text>
         
-        {/* Graph Nodes Progress */}
-        <View style={styles.nsgsMetricContainer}>
-          <View style={styles.nsgsMetricHeader}>
-            <Text style={styles.nsgsMetricTitle}>Graph Nodes</Text>
-            <Text style={styles.nsgsMetricValue}>{nsgsProcessingStats.graphNodes.toLocaleString()}</Text>
-          </View>
-          <View style={styles.nsgsProgressBarContainer}>
-            <RNAnimated.View 
-              style={[
-                styles.nsgsProgressBar, 
-                { width: width.interpolate({
-                  inputRange: [0, 100],
-                  outputRange: ['0%', '100%']
-                }) 
-              }]}
-            />
-          </View>
-        </View>
-        
-        {/* Processed Spikes Progress */}
-        <View style={styles.nsgsMetricContainer}>
-          <View style={styles.nsgsMetricHeader}>
-            <Text style={styles.nsgsMetricTitle}>Processed Spikes</Text>
-            <Text style={styles.nsgsMetricValue}>
-              {nsgsProcessingStats.processedSpikes.toLocaleString()}
-            </Text>
-          </View>
-          <View style={styles.nsgsProgressBarContainer}>
-            <RNAnimated.View 
-              style={[
-                styles.nsgsProgressBar, 
-                { 
-                  width: spikesWidth.interpolate({
-                    inputRange: [0, 100],
-                    outputRange: ['0%', '100%']
-                  }),
-                  backgroundColor: '#6A35D9' 
-                }
-              ]}
-            />
-          </View>
-        </View>
-        
-        {/* Queue Size Progress */}
-        <View style={styles.nsgsMetricContainer}>
-          <View style={styles.nsgsMetricHeader}>
-            <Text style={styles.nsgsMetricTitle}>Queue Size</Text>
-            <Text style={styles.nsgsMetricValue}>
-              {nsgsProcessingStats.queueSize.toLocaleString()}
-            </Text>
-          </View>
-          <View style={styles.nsgsProgressBarContainer}>
-            <RNAnimated.View 
-              style={[
-                styles.nsgsProgressBar, 
-                { 
-                  width: queueWidth.interpolate({
-                    inputRange: [0, 100],
-                    outputRange: ['0%', '100%']
-                  }),
-                  backgroundColor: '#FF9500' 
-                }
-              ]}
-            />
-          </View>
-        </View>
-        
-        {/* System Adaptation Progress */}
-        <View style={styles.nsgsMetricContainer}>
-          <View style={styles.nsgsMetricHeader}>
-            <Text style={styles.nsgsMetricTitle}>Adaptation Multiplier</Text>
-            <Text style={styles.nsgsMetricValue}>
-              {nsgsProcessingStats.adaptationMultiplier.toFixed(5)}
-            </Text>
-          </View>
-          <View style={styles.nsgsProgressBarContainer}>
-            <RNAnimated.View 
-              style={[
-                styles.nsgsProgressBar, 
-                { 
-                  width: adaptWidth.interpolate({
-                    inputRange: [0, 100],
-                    outputRange: ['0%', '100%']
-                  }),
-                  backgroundColor: '#34C759' 
-                }
-              ]}
-            />
-          </View>
-        </View>
-        
-        {nsgsProcessingStats.processingTime > 0 && (
+        {processingTimer > 0 && (
           <Text style={styles.nsgsProcessingTime}>
-            Processing Time: {nsgsProcessingStats.processingTime.toFixed(2)}s
+            Time Elapsed: {processingTimer}s
           </Text>
         )}
       </View>
@@ -1689,7 +1560,7 @@ export default function DetectScreen() {
                 </TouchableOpacity>
               </View>
             ) : processedImage ? (
-              <View style={styles.resultImageContainer}>
+              <View style={[styles.resultImageContainer, { backgroundColor: theme.card }]}>
                 {/* Image title when showing a stack slideshow */}
                 {processedResults.length > 1 && (
                   <View style={styles.imageTitleContainer}>
@@ -1704,6 +1575,27 @@ export default function DetectScreen() {
                   style={styles.resultImage}
                   resizeMode="contain"
                 />
+
+                {/* Processing Time Display */}
+                {processingTime !== null && (
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    marginTop: 12,
+                    padding: 8,
+                    borderRadius: 12,
+                    backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                  }}>
+                    <Zap size={16} color={theme.text} style={{ marginRight: 8 }} />
+                    <Text style={{
+                      fontSize: 14,
+                      fontWeight: '500',
+                      color: theme.text
+                    }}>
+                      Processing Time: {processingTime}s
+                    </Text>
+                  </View>
+                )}
                 
                 {/* Slideshow Navigation - Show only when we have multiple images */}
                 {processedResults.length > 1 && (
@@ -1753,10 +1645,18 @@ export default function DetectScreen() {
                     </TouchableOpacity>
                   </View>
                 )}
-                
-                {useNSGS && renderNsgsMetrics()}
               </View>
             ) : null}
+            
+            {/* NSGS Metrics Container - Now outside of the resultImageContainer */}
+            {useNSGS && processedImage && (
+              <View style={[styles.standalonensgsMetricsContainer, { backgroundColor: theme.card }]}>
+                <Text style={[styles.nsgsMetricsHeaderText, { color: theme.text }]}>NSGS Processing Details</Text>
+                <ScrollView style={styles.nsgsMetricsScrollView}>
+                  {renderNsgsMetrics()}
+                </ScrollView>
+              </View>
+            )}
           </Animated.View>
         )}
       </ScrollView>
@@ -2151,9 +2051,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   nsgsMetricsContainer: {
-    marginTop: 16,
-    padding: 16,
-    borderRadius: BORDER_RADIUS,
+    marginTop: 20,
+    padding: 15,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    maxHeight: 250,
   },
   nsgsMetricsTitle: {
     fontSize: 16,
@@ -2187,7 +2089,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   nsgsMetricsTimeValue: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#6A35D9',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
@@ -2215,18 +2117,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   resultImageContainer: {
-    height: 400,
     width: '100%',
+    borderRadius: BORDER_RADIUS,
     overflow: 'hidden',
-    borderWidth: 0,
+    ...CARD_SHADOW,
     position: 'relative',
-    backgroundColor: 'rgba(0, 0, 0, 0.03)',
-    borderRadius: 12,
+    marginBottom: 15,
   },
   resultImage: {
     width: '100%',
-    height: '100%',
-    backgroundColor: 'transparent',
+    height: 300,
+    borderRadius: BORDER_RADIUS,
+    marginBottom: 12,
   },
   debugInfoContainer: {
     position: 'absolute',
@@ -2273,12 +2175,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   slideshowControls: {
-    position: 'absolute',
-    bottom: 16,
-    left: 16,
-    right: 16,
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     alignItems: 'center',
     padding: 10,
     borderRadius: 25,
@@ -2333,18 +2231,54 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   imageTitleContainer: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    padding: 12,
     zIndex: 5,
+    textAlign: 'center',
   },
   imageTitleText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  standalonensgsMetricsContainer: {
+    width: '100%',
+    marginTop: 20,
+    padding: 15,
+    borderRadius: BORDER_RADIUS,
+    ...CARD_SHADOW,
+  },
+  nsgsMetricsHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  nsgsMetricsScrollView: {
+    maxHeight: 250,
+  },
+  nsgsLogsContainer: {
+    marginTop: 16,
+    width: '100%',
+  },
+  nsgsLogsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  nsgsLogsScrollView: {
+    maxHeight: 400,
+    borderRadius: 8,
+    padding: 10,
+  },
+  nsgsLogsText: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
