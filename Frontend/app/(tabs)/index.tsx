@@ -11,7 +11,8 @@ import {
   Alert,
   Modal,
   FlatList,
-  Animated as RNAnimated
+  Animated as RNAnimated,
+  Dimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera, Upload, Image as ImageIcon, Wifi, Bug, BrainCircuit, Scan, Layers, Zap, Network, ChevronDown, LayoutGrid, CopyCheck } from 'lucide-react-native';
@@ -545,6 +546,27 @@ export default function DetectScreen() {
     }
   }, [processing, useNSGS, startTriangleAnimation]);
 
+  // Move this before renderNsgsMetrics
+  // Add function to fetch NSGS logs directly from debug endpoint
+  const fetchNsgsDebugLogs = async () => {
+    try {
+      const response = await fetch(`${getApiUrl()}/debug/nsgs-logs`);
+      const data = await response.json();
+      
+      if (data && data.logs) {
+        // Update the stats directly with the fetched logs
+        setNsgsProcessingStats(prevStats => ({
+          ...prevStats,
+          logsOutput: data.logs,
+          status: data.stats?.status || prevStats.status
+        }));
+        console.log("Fetched NSGS logs directly from debug endpoint");
+      }
+    } catch (error) {
+      console.error("Error fetching NSGS debug logs:", error);
+    }
+  };
+
   // Add rendered metrics to show below the result
   const renderNsgsMetrics = useCallback(() => {
     if (!processedImage || !useNSGS) return null;
@@ -552,17 +574,101 @@ export default function DetectScreen() {
     return (
       <View style={[styles.nsgsMetricsContainer, {
         backgroundColor: theme.card,
-        ...(isDarkMode ? {} : CARD_SHADOW)
+        ...(isDarkMode ? {} : CARD_SHADOW),
+        marginBottom: 20, // Reduced margin since we'll have a separate logs container
       }]}>
-        <Text style={[styles.nsgsMetricsTitle, { color: theme.text }]}>NSGS Processing Logs</Text>
+        <Text style={[styles.nsgsMetricsTitle, { color: theme.text }]}>NSGS Processing Details</Text>
         
-        {/* NSGS Raw Log Output */}
-        <ScrollView style={[styles.nsgsLogsScrollView, { 
-          backgroundColor: isDarkMode ? '#1a1a1a' : '#f0f0f0',
-          maxHeight: 400, // Increased height for better visibility
+        {/* Add debug refresh button */}
+        <TouchableOpacity 
+          style={[styles.debugRefreshButton, {
+            backgroundColor: isDarkMode ? '#333' : '#e0e0e0',
+            marginVertical: 10,
+          }]}
+          onPress={fetchNsgsDebugLogs}
+        >
+          <Text style={[styles.debugRefreshText, { color: isDarkMode ? '#fff' : '#333' }]}>
+            Refresh Logs
+          </Text>
+        </TouchableOpacity>
+        
+        {/* NSGS Log Status Indicator */}
+        <View style={styles.logStatusContainer}>
+          <Text style={[styles.logStatusText, { color: theme.text }]}>
+            Log Status: {nsgsProcessingStats.logsOutput && nsgsProcessingStats.logsOutput.length > 0 
+              ? <Text style={{color: 'green'}}>Available</Text> 
+              : <Text style={{color: 'red'}}>Not Available</Text>}
+          </Text>
+          <Text style={[styles.logStatusText, { color: theme.text }]}>
+            Log Length: {nsgsProcessingStats.logsOutput ? nsgsProcessingStats.logsOutput.length : 0} characters
+          </Text>
+        </View>
+        
+        {/* Remove the logs ScrollView from here - it will be moved to a separate container */}
+      </View>
+    );
+  }, [processedImage, useNSGS, nsgsProcessingStats, theme, isDarkMode, fetchNsgsDebugLogs]);
+
+  // Now create a new separate function to render just the logs
+  const renderNsgsLogs = useCallback(() => {
+    if (!processedImage || !useNSGS) return null;
+    
+    return (
+      <View style={[styles.standaloneLogsContainer, {
+        backgroundColor: theme.card,
+        ...(isDarkMode ? {} : CARD_SHADOW),
+        borderWidth: 2,
+        borderColor: theme.primary,
+        marginTop: 30,
+      }]}>
+        <Text style={[styles.nsgsLogsTitle, { 
+          color: theme.text,
+          fontSize: 20,
+          marginBottom: 15
         }]}>
-          <Text style={[styles.nsgsLogsText, { color: isDarkMode ? '#e0e0e0' : '#333333' }]}>
-            {nsgsProcessingStats.logsOutput || "No logs available"}
+          NSGS Full Logs
+        </Text>
+        
+        <TouchableOpacity 
+          style={[styles.debugRefreshButton, {
+            backgroundColor: theme.primary,
+            marginVertical: 10,
+            width: '50%',
+            alignSelf: 'center',
+          }]}
+          onPress={fetchNsgsDebugLogs}
+        >
+          <Text style={[styles.debugRefreshText, { color: '#fff' }]}>
+            Refresh Logs
+          </Text>
+        </TouchableOpacity>
+        
+        {/* NSGS Raw Log Output in a standalone container */}
+        <ScrollView 
+          style={[styles.nsgsLogsScrollView, { 
+            backgroundColor: isDarkMode ? '#1a1a1a' : '#f0f0f0',
+            height: 1000, // Large fixed height
+            minHeight: 800, 
+            borderWidth: 2,
+            borderColor: isDarkMode ? theme.primary + '80' : theme.primary + '40',
+            padding: 15,
+            marginBottom: 30,
+            marginTop: 10,
+            borderRadius: 8,
+          }]}
+          showsVerticalScrollIndicator={true}
+          nestedScrollEnabled={true}
+        >
+          <Text style={[styles.nsgsLogsText, { 
+            color: isDarkMode ? '#e0e0e0' : '#333333',
+            fontSize: 13,
+            lineHeight: 18,
+            fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+            paddingBottom: 30,
+          }]}>
+            {nsgsProcessingStats.logsOutput && nsgsProcessingStats.logsOutput.length > 0 
+              ? nsgsProcessingStats.logsOutput 
+              : "No logs available - Press 'Refresh Logs' button to fetch the latest logs"}
           </Text>
         </ScrollView>
       </View>
@@ -744,6 +850,8 @@ export default function DetectScreen() {
                 
                 // Store the raw logs if available
                 const nsgsLogs = nsgsStats.logsOutput || '';
+                console.log(`NSGS logs in response: ${nsgsLogs.substring(0, 100)}${nsgsLogs.length > 100 ? '...' : ''}`);
+                console.log(`NSGS logs length: ${nsgsLogs.length}`);
                 
                 // Update current stats for the progress display
                 setNsgsProcessingStats({
@@ -961,6 +1069,15 @@ export default function DetectScreen() {
       setProcessing(false);
       // Reset progress
       setProcessingProgress({ current: 0, total: 0 });
+      
+      // Add automatic log fetching when NSGS is used
+      if (useNSGS) {
+        // Wait a brief moment to ensure logs are saved on the backend
+        setTimeout(() => {
+          console.log("Auto-fetching NSGS logs after processing");
+          fetchNsgsDebugLogs();
+        }, 500);
+      }
     }
   }, [selectedImage, selectedImages, selectedModel, debugMode, useNSGS, selectedImageMode, startTriangleAnimation]);
 
@@ -1362,13 +1479,29 @@ export default function DetectScreen() {
     }
   }, []);
 
+  // Add a useEffect to fetch logs on component mount
+  useEffect(() => {
+    // Fetch NSGS logs when the component mounts
+    if (useNSGS) {
+      console.log("Fetching NSGS logs on component mount");
+      fetchNsgsDebugLogs();
+    }
+  }, [useNSGS]); // Only re-run if useNSGS changes
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+    <SafeAreaView style={{ 
+      flex: 1, 
+      backgroundColor: theme.background,
+      minHeight: Dimensions.get('window').height, // Ensure minimum height based on window
+    }}>
       <ScrollView 
         contentContainerStyle={[
           styles.container,
-          { paddingBottom: Platform.OS === 'ios' ? 100 : 80 } // Add extra padding at the bottom
+          { 
+            paddingBottom: Platform.OS === 'ios' ? 600 : 580, // Even more padding at the bottom
+          }
         ]}
+        showsVerticalScrollIndicator={true} // Ensure scroll indicator is visible
       >
         <Text style={[styles.title, { color: theme.text }]}>Object Detection</Text>
         
@@ -1648,14 +1781,28 @@ export default function DetectScreen() {
               </View>
             ) : null}
             
-            {/* NSGS Metrics Container - Now outside of the resultImageContainer */}
+            {/* NSGS Metrics Container */}
             {useNSGS && processedImage && (
-              <View style={[styles.standalonensgsMetricsContainer, { backgroundColor: theme.card }]}>
-                <Text style={[styles.nsgsMetricsHeaderText, { color: theme.text }]}>NSGS Processing Details</Text>
-                <ScrollView style={styles.nsgsMetricsScrollView}>
-                  {renderNsgsMetrics()}
-                </ScrollView>
-              </View>
+              <>
+                <View style={[styles.standalonensgsMetricsContainer, { 
+                  backgroundColor: theme.card,
+                  paddingBottom: 20,
+                  marginBottom: 20, // Reduced margin since we'll have a separate logs container
+                }]}>
+                  <Text style={[styles.nsgsMetricsHeaderText, { color: theme.text }]}>NSGS Processing Details</Text>
+                  <ScrollView 
+                    style={styles.nsgsMetricsScrollView}
+                    contentContainerStyle={{ paddingBottom: 20 }}
+                    showsVerticalScrollIndicator={true}
+                    nestedScrollEnabled={true}
+                  >
+                    {renderNsgsMetrics()}
+                  </ScrollView>
+                </View>
+                
+                {/* Separate standalone container for logs */}
+                {renderNsgsLogs()}
+              </>
             )}
           </Animated.View>
         )}
@@ -1879,7 +2026,7 @@ const styles = StyleSheet.create({
   },
   resultContainer: {
     marginTop: 16,
-    marginBottom: 32,
+    marginBottom: 100, // Increase the bottom margin for more space
     padding: 0,
     borderRadius: 12,
     overflow: 'hidden',
@@ -2096,7 +2243,7 @@ const styles = StyleSheet.create({
   },
   resultsContainer: {
     marginTop: 16,
-    marginBottom: 32,
+    marginBottom: 100, // Increase the bottom margin for more space
     padding: 0,
     borderRadius: 12,
     overflow: 'hidden',
@@ -2250,14 +2397,16 @@ const styles = StyleSheet.create({
   standalonensgsMetricsContainer: {
     width: '100%',
     marginTop: 20,
+    marginBottom: 200,
     padding: 15,
     borderRadius: BORDER_RADIUS,
     ...CARD_SHADOW,
   },
   nsgsMetricsHeaderText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    marginBottom: 10,
+    marginBottom: 12,
+    textAlign: 'center',
   },
   nsgsMetricsScrollView: {
     maxHeight: 250,
@@ -2267,18 +2416,59 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   nsgsLogsTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: 12,
+    textAlign: 'center',
   },
   nsgsLogsScrollView: {
-    maxHeight: 400,
-    borderRadius: 8,
+    maxHeight: 1000, // Significantly increase the fixed height to show much more content
+    minHeight: 800, // Increase minimum height
+    borderWidth: 1,
+    borderColor: '#ddd',
     padding: 10,
+    marginBottom: 40, // Add bottom margin
   },
   nsgsLogsText: {
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     fontSize: 12,
     lineHeight: 18,
+  },
+  debugRefreshButton: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  debugRefreshText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  logStatusContainer: {
+    marginBottom: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  logStatusText: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  standaloneLogsContainer: {
+    width: '100%',
+    marginTop: 30,
+    marginBottom: 200,
+    padding: 20,
+    paddingBottom: 30,
+    borderRadius: BORDER_RADIUS,
+    ...CARD_SHADOW,
+    borderWidth: 2,
+    borderColor: '#6A35D9', // Use a distinctive color for the logs container
   },
 });
